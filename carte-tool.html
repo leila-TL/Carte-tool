@@ -1,0 +1,2634 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Générateur de cartes — Terres Lointaines</title>
+
+<link href="https://cdn.jsdelivr.net/npm/maplibre-gl@5.9.0/dist/maplibre-gl.css" rel="stylesheet" />
+<script src="https://cdn.jsdelivr.net/npm/maplibre-gl@5.9.0/dist/maplibre-gl.js"></script>
+<script>
+  // Fallback si jsdelivr est inaccessible : on bascule sur unpkg
+  if (typeof maplibregl === 'undefined') {
+    document.write('<scr' + 'ipt src="https://unpkg.com/maplibre-gl@5.9.0/dist/maplibre-gl.js"><\/scr' + 'ipt>');
+  }
+</script>
+
+<!-- Police Montserrat (charte Terres Lointaines) -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:ital,wght@0,400;0,500;0,600;0,700;1,500&display=swap" rel="stylesheet">
+
+<style>
+  * { box-sizing: border-box; }
+
+  :root {
+    --bg: #f5f5f4;
+    --panel: #ffffff;
+    --border: #e5e5e4;
+    --text: #1a1a1a;
+    --text-soft: #6b6b6b;
+    --accent: #1a4a75;
+    --accent-soft: #e8f0f7;
+    --plane: #F55C5D;
+    --road: #004D7B;
+    --ferry: #00A299;
+    --train: #4B5563;
+    --autocar: #B03D8E;
+    --hub: #E9C000;
+    --city-label: #004E7F;
+    --danger: #b91c1c;
+  }
+
+  html, body {
+    margin: 0;
+    padding: 0;
+    height: 100%;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    color: var(--text);
+    background: var(--bg);
+  }
+
+  #app {
+    display: grid;
+    grid-template-columns: 380px 1fr;
+    height: 100vh;
+    overflow: hidden;
+  }
+
+  /* PANNEAU GAUCHE */
+  #panel {
+    background: var(--panel);
+    border-right: 1px solid var(--border);
+    overflow-y: auto;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .panel-header {
+    padding: 18px 20px 14px;
+    border-bottom: 1px solid var(--border);
+    background: #fafaf9;
+    position: sticky;
+    top: 0;
+    z-index: 10;
+  }
+
+  .panel-header h1 {
+    margin: 0 0 4px;
+    font-size: 15px;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+  }
+
+  .panel-header .subtitle {
+    font-size: 12px;
+    color: var(--text-soft);
+  }
+
+  .section {
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .section h2 {
+    margin: 0 0 12px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-soft);
+  }
+
+  .field {
+    margin-bottom: 10px;
+  }
+
+  .field label {
+    display: block;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-soft);
+    margin-bottom: 4px;
+  }
+
+  input[type="text"], select, textarea {
+    width: 100%;
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-size: 13px;
+    font-family: inherit;
+    background: white;
+    color: var(--text);
+  }
+
+  input[type="text"]:focus, select:focus, textarea:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-soft);
+  }
+
+  button {
+    border: none;
+    border-radius: 6px;
+    padding: 8px 12px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    font-family: inherit;
+    transition: background 0.15s;
+  }
+
+  .btn-primary {
+    background: var(--accent);
+    color: white;
+    width: 100%;
+  }
+
+  .btn-primary:hover {
+    background: #143a5e;
+  }
+
+  .btn-secondary {
+    background: #f1f1f0;
+    color: var(--text);
+    border: 1px solid var(--border);
+  }
+
+  .btn-secondary:hover {
+    background: #e5e5e4;
+  }
+
+  .btn-danger {
+    background: transparent;
+    color: var(--danger);
+    padding: 4px 6px;
+    font-size: 11px;
+  }
+
+  .btn-danger:hover {
+    background: #fee;
+  }
+
+  .btn-group {
+    display: flex;
+    gap: 6px;
+  }
+
+  /* ITEMS (villes, trajets) */
+  .item-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-bottom: 10px;
+  }
+
+  .item {
+    background: #fafaf9;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 8px 10px;
+    font-size: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    transition: opacity 0.15s, transform 0.15s;
+  }
+
+  .item[draggable="true"] {
+    cursor: grab;
+  }
+
+  .item.dragging {
+    opacity: 0.4;
+    cursor: grabbing;
+  }
+
+  .item.drag-over-top {
+    border-top: 2px solid var(--accent);
+  }
+
+  .item.drag-over-bottom {
+    border-bottom: 2px solid var(--accent);
+  }
+
+  .drag-handle {
+    color: var(--text-soft);
+    font-size: 14px;
+    cursor: grab;
+    user-select: none;
+    padding: 0 2px;
+  }
+
+  .item .item-main {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .item .item-label {
+    font-weight: 600;
+  }
+
+  .item .item-meta {
+    color: var(--text-soft);
+    font-size: 11px;
+  }
+
+  .item-transport-tag {
+    display: inline-block;
+    padding: 1px 6px;
+    border-radius: 3px;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: white;
+  }
+
+  .tag-avion { background: var(--plane); }
+  .tag-voiture { background: var(--road); }
+  .tag-ferry { background: var(--ferry); }
+  .tag-train { background: var(--train); }
+  .tag-autocar { background: var(--autocar); }
+  .tag-train-ferry { background: linear-gradient(90deg, var(--train) 50%, var(--ferry) 50%); }
+
+  /* RADIO PILLS */
+  .pills {
+    display: flex;
+    gap: 4px;
+    flex-wrap: wrap;
+  }
+
+  .pill {
+    flex: 1;
+    min-width: 70px;
+    text-align: center;
+    padding: 6px 8px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-size: 12px;
+    cursor: pointer;
+    background: white;
+    user-select: none;
+  }
+
+  .pill.active {
+    background: var(--accent);
+    color: white;
+    border-color: var(--accent);
+  }
+
+  /* SUGGESTIONS GEOCODER */
+  .suggestions {
+    position: relative;
+  }
+
+  .suggestions-list {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    background: white;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    margin-top: 4px;
+    max-height: 200px;
+    overflow-y: auto;
+    z-index: 100;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+  }
+
+  .suggestion {
+    padding: 8px 10px;
+    font-size: 12px;
+    cursor: pointer;
+    border-bottom: 1px solid #f5f5f4;
+  }
+
+  .suggestion:hover {
+    background: var(--accent-soft);
+  }
+
+  .suggestion-name { font-weight: 600; }
+  .suggestion-meta { color: var(--text-soft); font-size: 11px; }
+
+  /* CARTE */
+  #map-area {
+    position: relative;
+    overflow: hidden;
+  }
+
+  #map {
+    position: absolute;
+    inset: 0;
+  }
+
+  #overlay {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+  }
+
+  #overlay .draggable-label {
+    pointer-events: auto;
+    cursor: move;
+  }
+
+  #overlay .draggable-label:hover {
+    opacity: 0.85;
+  }
+
+  #overlay .draggable-plane {
+    pointer-events: auto;
+    cursor: grab;
+  }
+
+  #overlay .draggable-plane:hover {
+    opacity: 0.8;
+  }
+
+  #overlay .draggable-plane:active {
+    cursor: grabbing;
+  }
+
+  #overlay .draggable-annotation {
+    pointer-events: auto;
+    cursor: grab;
+  }
+
+  #overlay .draggable-annotation:hover {
+    opacity: 0.85;
+  }
+
+  #overlay .draggable-annotation:active {
+    cursor: grabbing;
+  }
+
+  /* LÉGENDE */
+  .map-legend {
+    position: absolute;
+    bottom: 24px;
+    right: 24px;
+    background: white;
+    border-radius: 10px;
+    padding: 22px 26px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.08);
+    font-size: 18px;
+    color: var(--accent);
+    z-index: 5;
+    min-width: 200px;
+  }
+
+  .legend-line {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin-bottom: 12px;
+  }
+
+  .legend-line:last-of-type { margin-bottom: 0; }
+
+  /* CHARTE TL : tirets uniformes pour tous les modes terrestres/maritimes */
+  .legend-dash {
+    width: 52px;
+    height: 5px;
+    flex-shrink: 0;
+    border-radius: 2px;
+    /* tirets uniformes par défaut */
+    background: repeating-linear-gradient(
+      to right,
+      var(--road) 0 12px,
+      transparent 12px 20px
+    );
+  }
+
+  /* Avion : POINTS (charte TL) */
+  .legend-dash.avion {
+    background: repeating-linear-gradient(
+      to right,
+      var(--plane) 0 2px,
+      transparent 2px 10px
+    );
+  }
+
+  .legend-dash.voiture { background: repeating-linear-gradient(to right, var(--road) 0 12px, transparent 12px 20px); }
+  .legend-dash.train { background: repeating-linear-gradient(to right, var(--train) 0 12px, transparent 12px 20px); }
+  .legend-dash.ferry { background: repeating-linear-gradient(to right, var(--ferry) 0 12px, transparent 12px 20px); }
+  .legend-dash.autocar { background: repeating-linear-gradient(to right, var(--autocar) 0 12px, transparent 12px 20px); }
+
+  /* Train + Ferry mixte : alternance des 2 couleurs */
+  .legend-dash.train-ferry {
+    background: repeating-linear-gradient(
+      to right,
+      var(--train) 0 12px,
+      transparent 12px 16px,
+      var(--ferry) 16px 28px,
+      transparent 28px 32px
+    );
+  }
+
+  /* Pictos officiels charte TL */
+  .legend-picto {
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .legend-picto svg, .legend-picto img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+  }
+  /* Mode mixte : 2 pictos côte à côte plus petits */
+  .legend-line .legend-picto:has(svg + svg) svg {
+    width: 18px;
+    height: 18px;
+  }
+
+  .legend-note {
+    margin-top: 14px;
+    padding-top: 12px;
+    border-top: 1px solid var(--border);
+    font-size: 13px;
+    color: var(--text-soft);
+    text-align: center;
+  }
+
+  /* TITRE CARTE */
+  .map-title {
+    position: absolute;
+    top: 24px;
+    left: 24px;
+    background: white;
+    border-radius: 10px;
+    padding: 12px 18px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.08);
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--accent);
+    z-index: 5;
+    max-width: 380px;
+  }
+
+  .map-title:empty { display: none; }
+
+  /* GESTION CARTES */
+  .map-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 8px 10px;
+    background: #fafaf9;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-size: 12px;
+  }
+
+  .map-row.current {
+    background: var(--accent-soft);
+    border-color: var(--accent);
+  }
+
+  .map-row-name {
+    font-weight: 600;
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .map-row-actions {
+    display: flex;
+    gap: 2px;
+  }
+
+  .icon-btn {
+    background: transparent;
+    border: none;
+    padding: 4px 6px;
+    cursor: pointer;
+    font-size: 14px;
+    color: var(--text-soft);
+    border-radius: 4px;
+  }
+
+  .icon-btn:hover {
+    background: rgba(0,0,0,0.06);
+    color: var(--text);
+  }
+
+  /* MODAL d'avertissement clé */
+  .key-banner {
+    background: #fef3c7;
+    border-bottom: 1px solid #fbbf24;
+    padding: 10px 16px;
+    font-size: 12px;
+    color: #78350f;
+    display: none;
+  }
+  .key-banner.show { display: block; }
+
+  /* IMPRESSION */
+  @media print {
+    @page { margin: 0; }
+    body { background: white; }
+    #panel { display: none; }
+    #app { grid-template-columns: 1fr; }
+    #map-area { width: 100vw; height: 100vh; }
+    .map-legend { box-shadow: none; border: 1px solid var(--border); }
+    .map-title { box-shadow: none; border: 1px solid var(--border); }
+  }
+
+  .empty-state {
+    color: var(--text-soft);
+    font-size: 12px;
+    font-style: italic;
+    padding: 8px 0;
+  }
+
+  .help {
+    font-size: 11px;
+    color: var(--text-soft);
+    margin-top: 6px;
+    line-height: 1.4;
+  }
+</style>
+</head>
+<body>
+
+<div id="app">
+
+  <!-- PANNEAU GAUCHE -->
+  <aside id="panel">
+
+    <div class="panel-header">
+      <h1>Générateur de cartes</h1>
+      <div class="subtitle">Terres Lointaines · prototype</div>
+    </div>
+
+    <div id="keyBanner" class="key-banner">
+      Clé MapTiler manquante. Ajoute-la dans la section <strong>Configuration</strong> ci-dessous.
+    </div>
+
+    <!-- TITRE -->
+    <div class="section">
+      <h2>Carte en cours</h2>
+      <div class="field">
+        <label>Nom interne (sauvegarde)</label>
+        <input type="text" id="mapName" placeholder="ex. Italie du Sud - été 2026" />
+      </div>
+      <div class="field">
+        <label>Titre affiché sur la carte (laisser vide pour rien)</label>
+        <input type="text" id="mapTitle" placeholder="ex. Naples & Côte Amalfitaine" />
+      </div>
+      <button class="btn-primary" id="saveBtn">Sauvegarder</button>
+    </div>
+
+    <!-- VILLES -->
+    <div class="section">
+      <h2>Étapes</h2>
+      <div id="cityList" class="item-list"></div>
+
+      <div class="field suggestions">
+        <label>Ajouter une étape (recherche par nom)</label>
+        <input type="text" id="citySearch" placeholder="ex. Naples, Italie" autocomplete="off" />
+        <div id="citySuggestions" class="suggestions-list" style="display:none"></div>
+      </div>
+
+      <div class="help">
+        Tape un nom de ville ou de lieu. Les suggestions viennent de MapTiler.<br>
+        Astuce : tu peux glisser-déposer les labels directement sur la carte pour les repositionner.
+      </div>
+    </div>
+
+    <!-- TRAJETS -->
+    <div class="section">
+      <h2>Trajets</h2>
+      <div id="routeList" class="item-list"></div>
+
+      <div class="field">
+        <label>Depuis</label>
+        <select id="routeFrom"></select>
+      </div>
+      <div class="field">
+        <label>Vers</label>
+        <select id="routeTo"></select>
+      </div>
+      <div class="field">
+        <label>Transport</label>
+        <div class="pills" id="transportPills">
+          <div class="pill active" data-transport="avion">Avion</div>
+          <div class="pill" data-transport="voiture">Voiture</div>
+          <div class="pill" data-transport="train">Train</div>
+          <div class="pill" data-transport="ferry">Bateau</div>
+          <div class="pill" data-transport="autocar">Autocar</div>
+        </div>
+      </div>
+      <button class="btn-secondary" id="addRouteBtn" style="width:100%">+ Ajouter ce trajet</button>
+      <div class="help">
+        Pour un aller-retour (ex. Sorrente ↔ Capri), ajoute deux trajets séparés.<br>
+        Astuce : tu peux glisser les avions sur la carte pour les déplacer le long de leur courbe.
+      </div>
+    </div>
+
+    <!-- APPARENCE -->
+    <div class="section">
+      <h2>Apparence</h2>
+      <div class="field">
+        <label>Taille des labels villes : <span id="labelSizeVal">18</span> px</label>
+        <input type="range" id="labelSizeRange" min="15" max="40" value="18" style="width:100%" />
+      </div>
+      <div class="field">
+        <label>Épaisseur des traits : <span id="strokeWidthVal">5</span> px</label>
+        <input type="range" id="strokeWidthRange" min="2" max="9" step="0.5" value="5" style="width:100%" />
+      </div>
+      <div class="field">
+        <label>Espacement des pointillés : <span id="spacingVal">1</span>×</label>
+        <input type="range" id="spacingRange" min="0.5" max="2" step="0.1" value="1" style="width:100%" />
+      </div>
+      <div class="field">
+        <label>Taille des flèches de sens : <span id="arrowSizeVal">1.8</span>×</label>
+        <input type="range" id="arrowSizeRange" min="0.5" max="4" step="0.1" value="1.8" style="width:100%" />
+      </div>
+    </div>
+
+    <!-- CADRAGE -->
+    <div class="section">
+      <h2>Cadrage de la carte</h2>
+      <button class="btn-secondary" id="recadrerBtn" style="width:100%">🎯 Recadrer sur les étapes</button>
+      <div class="help">
+        Recalcule automatiquement le zoom pour montrer toutes les étapes. Tu peux aussi bouger la carte à la souris pour un cadrage manuel.
+      </div>
+    </div>
+
+    <!-- ANNOTATIONS -->
+    <div class="section">
+      <h2>Annotations (mers, régions…)</h2>
+      <div id="annotationList" class="item-list"></div>
+      <div style="display:flex;gap:6px">
+        <button class="btn-secondary" id="addAnnotationBtn" style="flex:1">+ Ajouter un texte</button>
+        <button class="btn-secondary" id="addWavesBtn" style="flex:1">+ Picto vagues</button>
+      </div>
+      <div class="help">
+        <strong>Texte</strong> : pour écrire "Mer du Japon", "Océan Atlantique" en français par-dessus la carte. <strong>Picto vagues</strong> : juste les vagues, sans texte. Glisse à la souris pour positionner.
+      </div>
+    </div>
+
+    <!-- CARTES SAUVEGARDÉES -->
+    <div class="section">
+      <h2>Cartes sauvegardées</h2>
+      <div id="savedList" class="item-list"></div>
+      <div class="btn-group">
+        <button class="btn-secondary" id="newMapBtn" style="flex:1">+ Nouvelle carte</button>
+        <button class="btn-secondary" id="exportJsonBtn" style="flex:1">Exporter JSON</button>
+      </div>
+      <input type="file" id="importJsonInput" accept=".json" style="display:none" />
+      <button class="btn-secondary" id="importJsonBtn" style="width:100%; margin-top:6px">Importer JSON</button>
+    </div>
+
+    <!-- EXPORT -->
+    <div class="section">
+      <h2>Export</h2>
+      <div class="field">
+        <label>Format de fichier</label>
+        <select id="exportFileType">
+          <option value="jpeg">JPEG — léger, recommandé pour le site</option>
+          <option value="png">PNG — qualité max, plus lourd</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Dimensions</label>
+        <select id="exportFormat">
+          <option value="site-1440" selected>Site 1440 × 960 (recommandé)</option>
+          <option value="site-1080">Site 1080 × 720 (plus léger)</option>
+          <option value="site-2160">HD 2160 × 1440 (max qualité)</option>
+          <option value="current">Taille de la fenêtre</option>
+        </select>
+      </div>
+      <div class="field" id="jpegQualityField">
+        <label>Qualité JPEG : <span id="jpegQualityVal">85</span>%</label>
+        <input type="range" id="jpegQualityRange" min="60" max="95" step="5" value="85" style="width:100%" />
+      </div>
+      <button class="btn-secondary" onclick="exportPNG('preview')" style="width:100%;margin-bottom:6px">👁 Aperçu avant export</button>
+      <button class="btn-primary" onclick="exportPNG()">Exporter</button>
+      <button class="btn-secondary" onclick="window.print()" style="width:100%;margin-top:6px">Exporter en PDF (impression)</button>
+      <div class="help">
+        <strong>JPEG 85% — 1440 × 960</strong> donne typiquement un fichier de 200-400 ko (vs 1-2 Mo en PNG). Idéal pour WordPress.
+      </div>
+    </div>
+
+    <!-- CONFIG -->
+    <div class="section">
+      <h2>Configuration</h2>
+      <div class="field">
+        <label>Clé API MapTiler ⚠️ ne pas modifier</label>
+        <input type="password" id="maptilerKey" placeholder="clé déjà configurée" autocomplete="off" />
+      </div>
+      <div class="field">
+        <label>Style de carte</label>
+        <select id="mapStyle">
+          <option value="019eb0d0-5330-7b81-b427-c08c5f9ad974">⭐ TL - Voyage FR (recommandé)</option>
+          <option value="dataviz">Dataviz (sobre, anglais)</option>
+          <option value="dataviz-light">Dataviz light (très clair)</option>
+          <option value="basic-v2-light">Basic light (avec routes)</option>
+          <option value="streets-v2">Streets (carte routière)</option>
+          <option value="outdoor-v2">Outdoor (avec relief)</option>
+        </select>
+      </div>
+      <div class="help">
+        Le style "TL - Voyage FR" a les noms en français (mers, pays, villes). À utiliser par défaut pour les cartes du site.
+      </div>
+    </div>
+
+    <div style="margin-top:16px;padding:10px 12px;text-align:center;font-size:11px;color:var(--text-soft);border-top:1px solid var(--border)">
+      Outil cartes Terres Lointaines · <strong>v1.3</strong> · 18/06/26
+    </div>
+
+  </aside>
+
+  <!-- ZONE CARTE -->
+  <main id="map-area">
+    <div id="map"></div>
+    <svg id="overlay"></svg>
+
+    <div class="map-title" id="mapTitleDisplay"></div>
+
+    <div class="map-legend" id="mapLegend">
+      <!-- Légende générée dynamiquement selon les transports utilisés -->
+    </div>
+  </main>
+
+</div>
+
+<script>
+/* ============================================================
+   ÉTAT
+   ============================================================ */
+const STORAGE_KEY = 'tl_cartes_v1';
+const CONFIG_KEY = 'tl_config_v1';
+
+const TRANSPORT_STYLES = {
+  // Avion : POINTS (stroke-linecap round + dash très court rend des cercles)
+  avion:        { color: '#F55C5D', dash: 'dots', plane: true },
+  // Tous les autres modes : tirets uniformes (même pattern partout)
+  voiture:      { color: '#004D7B', dash: 'uniform', plane: false },
+  train:        { color: '#4B5563', dash: 'uniform', plane: false },
+  ferry:        { color: '#00A299', dash: 'uniform', plane: false },
+  autocar:      { color: '#B03D8E', dash: 'uniform', plane: false },
+  // Mode mixte : on dessine en interne deux modes en alternance le long du trajet
+  'train-ferry': { color: '#4B5563', dash: 'mixed', plane: false, mixedWith: 'ferry' }
+};
+
+// === PICTOS OFFICIELS CHARTE TL (pour la légende) ===
+// Avion, Train, Ferry en SVG inline | Bus, Voiture en PNG base64 (depuis Charte 2025)
+const OFFICIAL_PICTOS = {
+  avion: `<svg viewBox="0 0 38.5 38.57" xmlns="http://www.w3.org/2000/svg"><path d="M17.1 37.03C15.59 37.03 14.45 36.13 14.2 34.73L14.16 34.49 15.7 22.89C15.28 23 14.85 23.12 14.46 23.23 13.9 23.39 13.36 23.54 12.92 23.64 12.73 23.68 12.3 23.75 11.84 23.81 11.62 23.84 11.32 23.88 11.07 23.92 10.87 24.35 10.6 25.08 10.42 25.56 9.93 26.87 9.61 27.69 9.2 28.2 8.64 28.86 7.86 29.22 7.03 29.22 6.08 29.22 5.18 28.75 4.62 27.97 3.99 27.09 4.14 25.82 4.6 23.34 4.62 23.26 4.63 23.18 4.64 23.1L3.99 22.62 3.83 22.31C3.43 21.55 3.64 20.82 3.9 20.31 3.76 20.14 3.62 19.97 3.49 19.81 2.53 18.65 2.06 18.06 1.85 17.63 1.4 16.72 1.45 15.68 1.98 14.83 2.5 14 3.38 13.5 4.34 13.5 4.68 13.5 5.02 13.56 5.35 13.69 6.05 13.96 6.85 14.61 7.99 15.57 8.3 15.83 8.73 16.19 9.03 16.42L13.51 15.03 6.58 5.72 6.5 5.53C6.17 4.69 6.28 3.79 6.78 3.06 7.41 2.14 8.63 1.55 9.88 1.55 10.74 1.55 11.51 1.84 12.06 2.37L23.58 12.04C24.32 11.9 25.22 11.65 26.16 11.39 28.07 10.86 30.23 10.27 32.15 10.27 33.32 10.27 34.28 10.48 35.1 10.92 36.75 11.81 37.41 13.73 36.63 15.38 35.31 18.18 31.2 19.19 27.89 20.01 27.13 20.2 26.41 20.37 25.81 20.55L20.49 35.06 20.45 35.14C19.9 36.26 18.52 37.03 17.1 37.03Z" fill="#F55C5D"/></svg>`,
+  train: `<svg viewBox="0 0 18.91 28.68" xmlns="http://www.w3.org/2000/svg"><path d="M18.91 28.68 16.09 28.68 13.51 24.24 13.31 24.14 5.52 24.14C5.52 24.14 2.84 28.69 2.84 28.69L0 28.69 3.93 22.16C3.58 21.94 3.17 21.78 2.83 21.54 2.1 21.01 1.53 20.14 1.3 19.27 1.36 14.89 0.99 10.25 1.23 5.89 1.34 3.93 2.83 2.32 4.82 2.18 7.88 1.97 11.19 2.34 14.27 2.19 16.16 2.45 17.55 3.93 17.69 5.83 17.99 9.99 17.47 14.52 17.68 18.72 17.55 20.3 16.5 21.53 15.05 22.1L15 22.21 18.92 28.7ZM7.47 2.72C7.22 2.82 7.03 3.02 7 3.29 6.97 3.56 6.96 4.52 7.01 4.75 7.08 5.07 7.41 5.2 7.7 5.23 8.53 5.31 10.45 5.32 11.26 5.23 11.49 5.2 11.77 5.08 11.86 4.85 11.94 4.66 11.94 3.48 11.9 3.24 11.85 2.93 11.55 2.74 11.26 2.71 10.06 2.6 8.68 2.79 7.46 2.73ZM4.9 5.8C4.22 5.93 3.69 6.33 3.46 6.99 3.25 7.58 3.24 9.96 3.42 10.57 3.63 11.32 4.22 11.85 5.01 11.92 7.87 12.17 11.08 11.73 13.97 11.92 14.61 11.83 15.15 11.44 15.4 10.84 15.68 10.18 15.7 7.67 15.46 7 15.22 6.33 14.58 5.85 13.85 5.79 11 5.55 7.79 5.96 4.9 5.81ZM4.83 17.4C4.47 17.46 4.02 17.82 3.84 18.13 3.03 19.52 4.56 21.02 5.93 20.29 7.4 19.5 6.71 17.09 4.83 17.41ZM13.37 17.4C12.05 17.62 11.74 19.59 12.94 20.26 14.26 21 15.76 19.67 15.16 18.28 14.86 17.59 14.09 17.28 13.37 17.4Z" fill="#4B5563"/><path d="M7.96 0.02C8.46-0.08 9.01 0.16 9.12 0.68 9.35 1.75 8.12 2.31 7.46 1.42 7.1 0.94 7.38 0.14 7.97 0.02Z" fill="#4B5563"/><path d="M10.48 0.02C11.48-0.14 12.03 0.97 11.23 1.63 9.99 2.66 9.04 0.25 10.48 0.02Z" fill="#4B5563"/></svg>`,
+  ferry: `<svg viewBox="0 0 22.94 26.01" xmlns="http://www.w3.org/2000/svg"><path d="M2.7 20.54C1.85 17.9 1.06 15.23 0.57 12.48L0.61 12.38 11.46 10.11 22.23 12.36 22.37 12.45C21.74 16.06 20.65 19.57 19.34 22.98L19.25 23.06C18.36 23.26 17.43 23.35 16.51 23.29 13.69 23.13 12.02 21.37 9.43 20.67 7.24 20.08 4.92 20.17 2.69 20.54Z" fill="#00A299"/><path d="M18.9 10.34 11.47 9.01 4.1 10.34 5.43 3.79 5.73 3.58 17.28 3.58C17.46 3.68 17.58 3.83 17.63 4.02L18.91 10.34ZM10.94 4.9 6.68 4.9 6.23 7.37 10.94 7.37 10.94 4.9ZM16.32 4.9 12 4.9 12 7.37 16.71 7.37 16.32 4.9Z" fill="#00A299"/><path d="M22.93 24.46C19.76 26.34 15.6 26.52 12.26 24.97 11.46 24.6 10.72 24.09 9.91 23.73 7.02 22.47 3.39 22.71 0.7 24.36 0.59 24.36 0 23.3 0 23.21 0 23.14 0.03 23.11 0.09 23.08 2.83 21.41 6.65 21.06 9.67 22.12 11.26 22.67 12.62 23.76 14.24 24.22 16.88 24.97 19.94 24.62 22.29 23.19 22.39 23.37 23 24.34 22.93 24.47Z" fill="#00A299"/><path d="M12.56 2.6 10.37 2.6 10.37 0.49C10.37 0.35 10.66 0.08 10.82 0.04 11.03-0.01 11.85-0.02 12.07 0.03 12.24 0.07 12.56 0.31 12.56 0.49L12.56 2.59Z" fill="#00A299"/></svg>`,
+  autocar: `<img alt="Autocar" src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABwAAAAiCAMAAAB7o0l7AAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAzUExURQAAAK9Aj689jK88jbA8j7A8jrA7jrA8jrA7j686j684j7E9j7A8jrA8jq87ja86ja88i4XlDSAAAAARdFJOUwAQUICvz9/vnzAgj7//cGBA3zLUxwAAAAlwSFlzAAAXEQAAFxEByibzPwAAAPhJREFUOE+lk0GWhCAMBQMkAYUPff/Tzgu0/RCHnsXU8hdqSCJRx/nAIqoxKnMKx0g7Z45SZqDhciFCpqNExLgSDwAh55xDqK21VoMCSF0Wk0+iOQfkc+YwGnAS0Qt6+94bRSWiirIKI4N7ZXkVRugfHc8/8CYd4FdhOKvoGGU9ifD0AtZ4IAjU1tZdFPDuJkNmYB7QB6colABoKcyJuRQRsZmqSgSKTWfHf+RmmkaXyedH7uuQ1gTbi4kRmbS5LS+38XOXsY0dm2l0xC8F9Sbs5N9Xsd5uYHJB7FC6YZFk25Daq7vRPr/DV2mX/EW+t5ljcXfpklr0A5E/Gk9/lquHAAAAAElFTkSuQmCC" />`,
+  voiture: `<img alt="Voiture" src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACIAAAAZCAMAAABjJAyeAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAzUExURQAAAABQgABNeQBNewBNewBNewBNewBOewBNfABMegBKegBNewBNegBNewBQeABNewBMfHX0hDcAAAARdFJOUwAQUHCPn7/Pr4Aw32DvIP9AdOyJTwAAAAlwSFlzAAAXEQAAFxEByibzPwAAANhJREFUOE+NklmSwzAIREGWwGgj9z/tDDieyExcyfuj6ZLYAA4wbbkQETMz0V6ypGfmpDYqees9HfQuhVtdHciyhgcy1ijva3SyL+psc02doL7kUi6pP56PV6lzXAp7gTprnkCq659XCg1t0FVVxx2qY7PCzXQHW8VbVK9YJy2KAQCIUgQBoxSZgDpEbj5r0ptbsg0gZg1CAHGLH4bEvKovP7nl4YP857HHAR5u2edEnHUES3K1uOUDX1kAs425vsHaFL8q2/Xbm7IObM9fWZCYj8YDlZh+Ez8c+xsuc5l1QgAAAABJRU5ErkJggg==" />`,
+  // Mode mixte affiché avec deux pictos côte à côte dans la légende
+};
+
+
+let state = {
+  id: null,
+  name: '',
+  title: '',
+  cities: [],     // [{id, name, label, lng, lat}]
+  routes: [],     // [{from, to, transport, curve}]
+  annotations: [], // [{id, text, lng, lat, fontSize, italic, color}]
+  cadrage: 'auto',
+  padding: 8,
+  manualCenter: null,
+  manualZoom: null,
+  labelSize: 18,        // taille font des labels villes
+  strokeWidth: 5,       // épaisseur des traits de trajet
+  spacingFactor: 1,      // multiplicateur d'espacement des pointillés
+  arrowSize: 1.8         // multiplicateur de taille des flèches de sens
+};
+
+let config = {
+  maptilerKey: '',
+  mapStyle: '019eb0d0-5330-7b81-b427-c08c5f9ad974'
+};
+
+let map = null;
+let selectedTransport = 'avion';
+
+/* ============================================================
+   PERSISTENCE
+   ============================================================ */
+function loadConfig() {
+  try {
+    const raw = localStorage.getItem(CONFIG_KEY);
+    if (raw) config = { ...config, ...JSON.parse(raw) };
+  } catch(e) {}
+}
+
+function saveConfig() {
+  localStorage.setItem(CONFIG_KEY, JSON.stringify(config));
+}
+
+function loadAllMaps() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch(e) { return []; }
+}
+
+function saveAllMaps(maps) {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(maps));
+}
+
+function saveCurrentMap() {
+  if (!state.name.trim()) {
+    alert('Donne un nom à la carte avant de sauvegarder.');
+    return;
+  }
+  const maps = loadAllMaps();
+  if (!state.id) state.id = 'map_' + Date.now();
+  const data = {
+    id: state.id,
+    name: state.name,
+    title: state.title,
+    cities: state.cities,
+    routes: state.routes,
+    annotations: state.annotations || [],
+    cadrage: state.cadrage,
+    padding: state.padding,
+    labelSize: state.labelSize,
+    strokeWidth: state.strokeWidth,
+    spacingFactor: state.spacingFactor,
+    arrowSize: state.arrowSize,
+    manualCenter: map ? [map.getCenter().lng, map.getCenter().lat] : null,
+    manualZoom: map ? map.getZoom() : null,
+    updatedAt: Date.now()
+  };
+  const idx = maps.findIndex(m => m.id === state.id);
+  if (idx >= 0) maps[idx] = data;
+  else maps.push(data);
+  saveAllMaps(maps);
+  renderSavedList();
+  flashSaved();
+}
+
+function flashSaved() {
+  const btn = document.getElementById('saveBtn');
+  const old = btn.textContent;
+  btn.textContent = '✓ Sauvegardé';
+  setTimeout(() => btn.textContent = old, 1200);
+}
+
+function loadMap(id) {
+  const maps = loadAllMaps();
+  const m = maps.find(x => x.id === id);
+  if (!m) return;
+  state = {
+    id: m.id,
+    name: m.name,
+    title: m.title || '',
+    cities: m.cities || [],
+    routes: m.routes || [],
+    annotations: m.annotations || [],
+    cadrage: m.cadrage || 'auto',
+    padding: m.padding ?? 8,
+    labelSize: m.labelSize ?? 18,
+    strokeWidth: m.strokeWidth ?? 5,
+    spacingFactor: m.spacingFactor ?? 1,
+    arrowSize: m.arrowSize ?? 1.8,
+    manualCenter: m.manualCenter || null,
+    manualZoom: m.manualZoom || null
+  };
+  syncFormFromState();
+  if (state.cadrage === 'manuel' && state.manualCenter && state.manualZoom != null) {
+    map.jumpTo({ center: state.manualCenter, zoom: state.manualZoom });
+  }
+  drawOverlay();
+  if (state.cadrage === 'auto') fitToBounds();
+}
+
+function deleteMap(id) {
+  if (!confirm('Supprimer cette carte ?')) return;
+  const maps = loadAllMaps().filter(m => m.id !== id);
+  saveAllMaps(maps);
+  if (state.id === id) newMap();
+  renderSavedList();
+}
+
+function duplicateMap(id) {
+  const maps = loadAllMaps();
+  const m = maps.find(x => x.id === id);
+  if (!m) return;
+  const copy = { ...JSON.parse(JSON.stringify(m)), id: 'map_' + Date.now(), name: m.name + ' (copie)', updatedAt: Date.now() };
+  maps.push(copy);
+  saveAllMaps(maps);
+  renderSavedList();
+}
+
+function newMap() {
+  state = {
+    id: null, name: '', title: '',
+    cities: [], routes: [], annotations: [],
+    cadrage: 'auto', padding: 8,
+    labelSize: 18, strokeWidth: 5, spacingFactor: 1, arrowSize: 1.8,
+    manualCenter: null, manualZoom: null
+  };
+  syncFormFromState();
+  drawOverlay();
+}
+
+/* ============================================================
+   RENDER UI
+   ============================================================ */
+function syncFormFromState() {
+  document.getElementById('mapName').value = state.name;
+  document.getElementById('mapTitle').value = state.title;
+  document.getElementById('mapTitleDisplay').textContent = state.title;
+  // Sliders apparence
+  document.getElementById('labelSizeRange').value = state.labelSize;
+  document.getElementById('labelSizeVal').textContent = state.labelSize;
+  document.getElementById('strokeWidthRange').value = state.strokeWidth;
+  document.getElementById('strokeWidthVal').textContent = state.strokeWidth;
+  document.getElementById('spacingRange').value = state.spacingFactor;
+  document.getElementById('spacingVal').textContent = state.spacingFactor;
+  document.getElementById('arrowSizeRange').value = state.arrowSize ?? 1.8;
+  document.getElementById('arrowSizeVal').textContent = state.arrowSize ?? 1.8;
+  renderCities();
+  renderRoutes();
+  renderRouteSelects();
+  renderAnnotations();
+  updateLegend();
+}
+
+function renderCities() {
+  const list = document.getElementById('cityList');
+  if (state.cities.length === 0) {
+    list.innerHTML = '<div class="empty-state">Aucune étape. Ajoute-en une ci-dessous.</div>';
+    return;
+  }
+  list.innerHTML = state.cities.map((c, i) => `
+    <div class="item" draggable="true" data-drag-type="city" data-drag-index="${i}">
+      <span class="drag-handle" title="Glisser pour réordonner">⠿</span>
+      <div class="item-main">
+        <input type="text" value="${escapeHtml(c.label)}"
+          onchange="renameCity('${c.id}', this.value)"
+          title="Clique pour renommer cette étape"
+          style="width:100%;background:transparent;border:1px solid transparent;border-radius:4px;padding:3px 6px;font-size:13px;font-weight:600;color:var(--accent);cursor:text"
+          onfocus="this.style.border='1px solid var(--accent)';this.style.background='white'"
+          onblur="this.style.border='1px solid transparent';this.style.background='transparent'" />
+        <div class="item-meta">
+          ${c.lat.toFixed(3)}, ${c.lng.toFixed(3)}
+          <label style="display:inline-flex;align-items:center;gap:4px;margin-left:8px;cursor:pointer;color:var(--text-soft);font-size:11px">
+            <input type="checkbox" ${c.excludeFromBounds ? 'checked' : ''} onchange="toggleExcludeBounds('${c.id}', this.checked)" style="margin:0" />
+            <span title="Si coché, ce point existe pour les flèches d'avion mais n'est pas pris en compte dans le cadrage auto.">hors cadrage</span>
+          </label>
+          ${c.labelOffset ? `<button onclick="resetLabelPosition('${c.id}')" style="margin-left:6px;background:transparent;border:none;color:var(--accent);font-size:11px;cursor:pointer;padding:0;text-decoration:underline">↺ position label</button>` : ''}
+        </div>
+      </div>
+      <button class="btn-danger" onclick="removeCity('${c.id}')">Suppr</button>
+    </div>
+  `).join('');
+  attachDragHandlers(list, 'city');
+}
+
+function renameCity(id, newLabel) {
+  const c = state.cities.find(x => x.id === id);
+  if (!c) return;
+  const trimmed = (newLabel || '').trim();
+  if (!trimmed) return; // ignore les labels vides
+  c.label = trimmed;
+  drawOverlay();
+  renderRouteSelects(); // les selects des trajets affichent le label
+}
+
+function toggleExcludeBounds(id, val) {
+  const c = state.cities.find(x => x.id === id);
+  if (!c) return;
+  c.excludeFromBounds = val;
+  drawOverlay();
+  if (state.cadrage === 'auto') fitToBounds();
+}
+
+function renderRoutes() {
+  const list = document.getElementById('routeList');
+  if (state.routes.length === 0) {
+    list.innerHTML = '<div class="empty-state">Aucun trajet.</div>';
+    return;
+  }
+  list.innerHTML = state.routes.map((r, i) => {
+    const from = state.cities.find(c => c.id === r.from);
+    const to = state.cities.find(c => c.id === r.to);
+    if (!from || !to) return '';
+    const isPlane = r.transport === 'avion';
+    const planeMoved = isPlane && r.planeT != null;
+    const currentCurve = (r.curve !== undefined && r.curve !== null) ? r.curve : autoCurve(i);
+    const curveCustom = (r.curve !== undefined && r.curve !== null);
+    return `
+      <div class="item" draggable="true" data-drag-type="route" data-drag-index="${i}" style="flex-direction:column;align-items:stretch;gap:6px">
+        <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px">
+          <span class="drag-handle" title="Glisser pour réordonner" style="align-self:center">⠿</span>
+          <div class="item-main">
+            <div class="item-label">
+              ${escapeHtml(from.label)} → ${escapeHtml(to.label)}
+              ${planeMoved ? `<span style="margin-left:6px;font-size:10px;color:var(--text-soft);font-weight:500">↕ avion déplacé</span>` : ''}
+            </div>
+            <div class="item-meta">
+              <select onchange="changeRouteTransport(${i}, this.value)"
+                style="font-size:11px;padding:2px 6px;border:1px solid var(--border);border-radius:4px;background:white;color:var(--text);cursor:pointer">
+                <option value="avion" ${r.transport==='avion'?'selected':''}>✈ Avion</option>
+                <option value="voiture" ${r.transport==='voiture'?'selected':''}>Voiture</option>
+                <option value="train" ${r.transport==='train'?'selected':''}>Train</option>
+                <option value="ferry" ${r.transport==='ferry'?'selected':''}>Bateau</option>
+                <option value="autocar" ${r.transport==='autocar'?'selected':''}>Autocar</option>
+                ${r.transport==='train-ferry' ? `<option value="train-ferry" selected>Train + Bateau (ancien)</option>` : ''}
+              </select>
+              ${planeMoved ? `<button onclick="resetPlanePosition(${i})" style="margin-left:6px;background:transparent;border:none;color:var(--accent);font-size:11px;cursor:pointer;padding:0;text-decoration:underline">↺ avion auto</button>` : ''}
+            </div>
+          </div>
+          <button class="btn-danger" onclick="removeRoute(${i})">Suppr</button>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;padding-top:4px;border-top:1px dashed var(--border)">
+          <label style="font-size:11px;color:var(--text-soft);min-width:70px">Courbure: <strong>${Math.round(currentCurve)}%</strong></label>
+          <input type="range" min="-100" max="100" step="2" value="${currentCurve}" oninput="setCurve(${i}, this.value)" style="flex:1" />
+          ${curveCustom ? `<button onclick="resetCurve(${i})" title="Auto" style="background:transparent;border:none;color:var(--accent);font-size:14px;cursor:pointer;padding:2px">↺</button>` : ''}
+        </div>
+        ${r.transport !== 'avion' ? `
+        <div style="display:flex;align-items:center;gap:6px;padding-top:4px;font-size:11px;color:var(--text-soft)">
+          <input type="checkbox" id="arrow_${i}" ${r.showArrow !== false ? 'checked' : ''} onchange="toggleRouteArrow(${i}, this.checked)" style="margin:0;cursor:pointer" />
+          <label for="arrow_${i}" style="cursor:pointer">Afficher la flèche de sens</label>
+        </div>` : ''}
+      </div>
+    `;
+  }).join('');
+  attachDragHandlers(list, 'route');
+}
+
+function setCurve(i, val) {
+  const r = state.routes[i];
+  if (!r) return;
+  r.curve = Number(val);
+  drawOverlay();
+  renderRoutes();
+}
+
+function changeRouteTransport(i, newTransport) {
+  const r = state.routes[i];
+  if (!r) return;
+  // si on passe de avion à autre chose, on enlève le planeT custom
+  if (r.transport === 'avion' && newTransport !== 'avion') {
+    delete r.planeT;
+  }
+  r.transport = newTransport;
+  drawOverlay();
+  renderRoutes();
+  updateLegend();
+}
+
+function toggleRouteArrow(i, checked) {
+  const r = state.routes[i];
+  if (!r) return;
+  r.showArrow = checked;
+  drawOverlay();
+}
+
+function resetCurve(i) {
+  const r = state.routes[i];
+  if (!r) return;
+  delete r.curve;
+  drawOverlay();
+  renderRoutes();
+}
+
+function renderRouteSelects() {
+  const from = document.getElementById('routeFrom');
+  const to = document.getElementById('routeTo');
+  const opts = state.cities.map(c => `<option value="${c.id}">${escapeHtml(c.label)}</option>`).join('');
+  from.innerHTML = opts;
+  to.innerHTML = opts;
+}
+
+function renderSavedList() {
+  const list = document.getElementById('savedList');
+  const maps = loadAllMaps().sort((a,b) => (b.updatedAt||0) - (a.updatedAt||0));
+  if (maps.length === 0) {
+    list.innerHTML = '<div class="empty-state">Aucune carte sauvegardée.</div>';
+    return;
+  }
+  list.innerHTML = maps.map(m => `
+    <div class="map-row ${m.id === state.id ? 'current' : ''}">
+      <div class="map-row-name" title="${escapeHtml(m.name)}">${escapeHtml(m.name)}</div>
+      <div class="map-row-actions">
+        <button class="icon-btn" title="Ouvrir" onclick="loadMap('${m.id}')">📂</button>
+        <button class="icon-btn" title="Dupliquer" onclick="duplicateMap('${m.id}')">⎘</button>
+        <button class="icon-btn" title="Supprimer" onclick="deleteMap('${m.id}')">🗑</button>
+      </div>
+    </div>
+  `).join('');
+}
+
+// Génère la légende HTML en filtrant les transports réellement utilisés
+// CHARTE TL : pictos officiels uniquement, plus de texte
+function updateLegend() {
+  const legend = document.getElementById('mapLegend');
+  if (!legend) return;
+
+  const usedTransports = new Set(state.routes.map(r => r.transport));
+  const allItems = [
+    { key: 'avion',        cls: 'avion',        picto: OFFICIAL_PICTOS.avion },
+    { key: 'voiture',      cls: 'voiture',      picto: OFFICIAL_PICTOS.voiture },
+    { key: 'train',        cls: 'train',        picto: OFFICIAL_PICTOS.train },
+    { key: 'ferry',        cls: 'ferry',        picto: OFFICIAL_PICTOS.ferry },
+    { key: 'autocar',      cls: 'autocar',      picto: OFFICIAL_PICTOS.autocar },
+    // Mode mixte : on affiche les 2 pictos correspondants côte à côte
+    { key: 'train-ferry',  cls: 'train-ferry',  picto: OFFICIAL_PICTOS.train + OFFICIAL_PICTOS.ferry }
+  ];
+  const items = allItems.filter(i => usedTransports.has(i.key));
+
+  if (items.length === 0) {
+    legend.style.display = 'none';
+    return;
+  }
+  legend.style.display = '';
+  legend.innerHTML = items.map(i => `
+    <div class="legend-line">
+      <div class="legend-dash ${i.cls}"></div>
+      <div class="legend-picto">${i.picto}</div>
+    </div>
+  `).join('') + '<div class="legend-note">Carte non exhaustive</div>';
+}
+
+function escapeHtml(s) {
+  return String(s || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+// === DRAG AND DROP POUR RÉORDONNER LES LISTES ===
+function attachDragHandlers(container, type) {
+  const items = container.querySelectorAll('[draggable="true"]');
+  let draggedIdx = null;
+
+  items.forEach(item => {
+    item.addEventListener('dragstart', e => {
+      draggedIdx = Number(item.dataset.dragIndex);
+      item.classList.add('dragging');
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', draggedIdx);
+    });
+
+    item.addEventListener('dragend', e => {
+      item.classList.remove('dragging');
+      // nettoie tous les indicateurs visuels
+      container.querySelectorAll('.drag-over-top, .drag-over-bottom')
+        .forEach(el => el.classList.remove('drag-over-top', 'drag-over-bottom'));
+      draggedIdx = null;
+    });
+
+    item.addEventListener('dragover', e => {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      // indique visuellement où ça va se placer
+      const rect = item.getBoundingClientRect();
+      const isAbove = (e.clientY - rect.top) < rect.height / 2;
+      container.querySelectorAll('.drag-over-top, .drag-over-bottom')
+        .forEach(el => el.classList.remove('drag-over-top', 'drag-over-bottom'));
+      item.classList.add(isAbove ? 'drag-over-top' : 'drag-over-bottom');
+    });
+
+    item.addEventListener('drop', e => {
+      e.preventDefault();
+      const fromIdx = Number(e.dataTransfer.getData('text/plain'));
+      let toIdx = Number(item.dataset.dragIndex);
+      const rect = item.getBoundingClientRect();
+      const isAbove = (e.clientY - rect.top) < rect.height / 2;
+      if (!isAbove) toIdx += 1;
+      // ajuste si on déplace vers le bas dans la même liste
+      if (fromIdx < toIdx) toIdx -= 1;
+      if (fromIdx === toIdx) return;
+      if (type === 'city') reorderCities(fromIdx, toIdx);
+      else reorderRoutes(fromIdx, toIdx);
+    });
+  });
+}
+
+function reorderCities(fromIdx, toIdx) {
+  const c = state.cities.splice(fromIdx, 1)[0];
+  state.cities.splice(toIdx, 0, c);
+  renderCities();
+  renderRouteSelects();
+  drawOverlay();
+}
+
+function reorderRoutes(fromIdx, toIdx) {
+  const r = state.routes.splice(fromIdx, 1)[0];
+  state.routes.splice(toIdx, 0, r);
+  renderRoutes();
+  drawOverlay();
+}
+
+// === ANNOTATIONS (textes libres : noms de mers, régions, etc.) ===
+function renderAnnotations() {
+  const list = document.getElementById('annotationList');
+  if (!list) return;
+  if (state.annotations.length === 0) {
+    list.innerHTML = '<div class="empty-state">Aucun texte libre. Utile pour les noms de mers en français.</div>';
+    return;
+  }
+  list.innerHTML = state.annotations.map(a => `
+    <div class="item" style="flex-direction:column;align-items:stretch;gap:6px">
+      <div style="display:flex;align-items:center;gap:6px">
+        <input type="text" value="${escapeHtml(a.text)}" placeholder="Mer du Japon"
+          oninput="updateAnnotation('${a.id}', 'text', this.value)"
+          style="flex:1;padding:4px 8px;border:1px solid var(--border);border-radius:4px;font-size:13px" />
+        <button class="btn-danger" onclick="removeAnnotation('${a.id}')">Suppr</button>
+      </div>
+      <div style="display:flex;align-items:center;gap:10px;font-size:11px;color:var(--text-soft);flex-wrap:wrap">
+        <label style="display:flex;align-items:center;gap:4px;cursor:pointer">
+          <input type="checkbox" ${a.italic ? 'checked' : ''} onchange="updateAnnotation('${a.id}', 'italic', this.checked)" style="margin:0" />
+          Italique
+        </label>
+        <label style="display:flex;align-items:center;gap:4px;cursor:pointer">
+          <input type="checkbox" ${a.waves ? 'checked' : ''} onchange="updateAnnotation('${a.id}', 'waves', this.checked)" style="margin:0" />
+          ≋ Vagues
+        </label>
+        <label style="flex:1;min-width:100px;display:flex;align-items:center;gap:6px">
+          Taille
+          <input type="range" min="12" max="48" value="${a.fontSize}"
+            oninput="updateAnnotation('${a.id}', 'fontSize', Number(this.value))"
+            style="flex:1" />
+          <span style="min-width:24px;text-align:right">${a.fontSize}</span>
+        </label>
+        <label style="display:flex;align-items:center;gap:4px" title="Couleur du texte">
+          <span style="font-size:10px">Aa</span>
+          <input type="color" value="${a.color}" onchange="updateAnnotation('${a.id}', 'color', this.value)"
+            style="width:24px;height:20px;border:none;padding:0;background:transparent;cursor:pointer" />
+        </label>
+        ${a.waves ? `
+        <label style="display:flex;align-items:center;gap:4px" title="Couleur des vagues">
+          <span style="font-size:10px">≋</span>
+          <input type="color" value="${a.waveColor || a.color}" onchange="updateAnnotation('${a.id}', 'waveColor', this.value)"
+            style="width:24px;height:20px;border:none;padding:0;background:transparent;cursor:pointer" />
+        </label>` : ''}
+      </div>
+    </div>
+  `).join('');
+}
+
+function addAnnotation() {
+  if (!map) { alert('La carte n\'est pas chargée.'); return; }
+  const center = map.getCenter();
+  const newAnnot = {
+    id: 'a_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7),
+    text: 'Nouveau texte',
+    lng: center.lng,
+    lat: center.lat,
+    fontSize: 20,
+    italic: true,
+    waves: true,
+    color: '#ffffff',
+    waveColor: '#ffffff'
+  };
+  state.annotations.push(newAnnot);
+  renderAnnotations();
+  drawOverlay();
+}
+
+function addWavesOnly() {
+  if (!map) { alert('La carte n\'est pas chargée.'); return; }
+  const center = map.getCenter();
+  const newAnnot = {
+    id: 'a_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7),
+    text: '',                    // picto vagues seul, sans texte
+    lng: center.lng,
+    lat: center.lat,
+    fontSize: 28,                // par défaut un peu plus gros qu'une annotation texte
+    italic: false,
+    waves: true,
+    color: '#ffffff',
+    waveColor: '#ffffff'
+  };
+  state.annotations.push(newAnnot);
+  renderAnnotations();
+  drawOverlay();
+}
+
+function removeAnnotation(id) {
+  state.annotations = state.annotations.filter(a => a.id !== id);
+  renderAnnotations();
+  drawOverlay();
+}
+
+function updateAnnotation(id, field, value) {
+  const a = state.annotations.find(x => x.id === id);
+  if (!a) return;
+  a[field] = value;
+  drawOverlay();
+}
+
+/* ============================================================
+   ACTIONS UI
+   ============================================================ */
+function removeCity(id) {
+  state.cities = state.cities.filter(c => c.id !== id);
+  state.routes = state.routes.filter(r => r.from !== id && r.to !== id);
+  renderCities();
+  renderRoutes();
+  renderRouteSelects();
+  drawOverlay();
+  updateLegend();
+  if (state.cadrage === 'auto') fitToBounds();
+}
+
+function removeRoute(i) {
+  state.routes.splice(i, 1);
+  renderRoutes();
+  drawOverlay();
+  updateLegend();
+}
+
+function addRoute() {
+  const from = document.getElementById('routeFrom').value;
+  const to = document.getElementById('routeTo').value;
+  if (!from || !to) { alert('Ajoute des étapes d\'abord.'); return; }
+  if (from === to) { alert('Choisis deux étapes différentes.'); return; }
+  state.routes.push({ from, to, transport: selectedTransport, curve: 0 });
+  renderRoutes();
+  drawOverlay();
+  updateLegend();
+}
+
+/* ============================================================
+   GÉOCODAGE MAPTILER
+   ============================================================ */
+let suggestTimeout = null;
+
+function setupCitySearch() {
+  const input = document.getElementById('citySearch');
+  const list = document.getElementById('citySuggestions');
+
+  input.addEventListener('input', () => {
+    const q = input.value.trim();
+    clearTimeout(suggestTimeout);
+    if (q.length < 2) { list.style.display = 'none'; return; }
+    suggestTimeout = setTimeout(() => searchCity(q), 250);
+  });
+
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('.suggestions')) list.style.display = 'none';
+  });
+}
+
+async function searchCity(q) {
+  if (!config.maptilerKey) {
+    alert('Configure ta clé MapTiler dans la section Configuration.');
+    return;
+  }
+  const list = document.getElementById('citySuggestions');
+  try {
+    const url = `https://api.maptiler.com/geocoding/${encodeURIComponent(q)}.json?key=${config.maptilerKey}&language=fr&limit=6`;
+    const res = await fetch(url);
+    const data = await res.json();
+    if (!data.features || data.features.length === 0) {
+      list.innerHTML = '<div class="suggestion"><div class="suggestion-meta">Aucun résultat</div></div>';
+      list.style.display = 'block';
+      return;
+    }
+    list.innerHTML = data.features.map((f, i) => `
+      <div class="suggestion" data-i="${i}">
+        <div class="suggestion-name">${escapeHtml(f.text || f.place_name)}</div>
+        <div class="suggestion-meta">${escapeHtml(f.place_name || '')}</div>
+      </div>
+    `).join('');
+    list.querySelectorAll('.suggestion').forEach((el, i) => {
+      el.addEventListener('click', () => selectSuggestion(data.features[i]));
+    });
+    list.style.display = 'block';
+  } catch(e) {
+    console.error(e);
+    list.innerHTML = '<div class="suggestion"><div class="suggestion-meta">Erreur de recherche</div></div>';
+    list.style.display = 'block';
+  }
+}
+
+function selectSuggestion(feature) {
+  const [lng, lat] = feature.center;
+  const city = {
+    id: 'c_' + Date.now() + '_' + Math.random().toString(36).slice(2,6),
+    name: feature.text || feature.place_name,
+    label: feature.text || feature.place_name,
+    lng, lat
+  };
+  state.cities.push(city);
+  document.getElementById('citySearch').value = '';
+  document.getElementById('citySuggestions').style.display = 'none';
+  renderCities();
+  renderRouteSelects();
+  drawOverlay();
+  if (state.cadrage === 'auto') fitToBounds();
+}
+
+/* ============================================================
+   CARTE & OVERLAY
+   ============================================================ */
+function initMap() {
+  const styleUrl = `https://api.maptiler.com/maps/${config.mapStyle}/style.json?key=${config.maptilerKey}`;
+  map = new maplibregl.Map({
+    container: 'map',
+    style: styleUrl,
+    center: [2.35, 46.5],
+    zoom: 4,
+    preserveDrawingBuffer: true
+  });
+
+  map.on('load', drawOverlay);
+  map.on('move', drawOverlay);
+  map.on('zoom', drawOverlay);
+  // Si l'utilisateur déplace la carte à la souris, on passe en mode manuel
+  map.on('dragstart', () => { state.cadrage = 'manuel'; });
+  window.addEventListener('resize', drawOverlay);
+}
+
+function refreshMapStyle() {
+  if (!map) return;
+  const styleUrl = `https://api.maptiler.com/maps/${config.mapStyle}/style.json?key=${config.maptilerKey}`;
+  map.setStyle(styleUrl);
+  setTimeout(drawOverlay, 400);
+}
+
+function fitToBounds() {
+  if (!map || state.cities.length === 0) return;
+  // n'inclure que les villes qui ne sont PAS marquées "hors cadrage"
+  const visibleForBounds = state.cities.filter(c => !c.excludeFromBounds);
+  if (visibleForBounds.length === 0) return;
+  if (visibleForBounds.length === 1) {
+    map.flyTo({ center: [visibleForBounds[0].lng, visibleForBounds[0].lat], zoom: 8, duration: 600 });
+    return;
+  }
+  const bounds = new maplibregl.LngLatBounds();
+  visibleForBounds.forEach(c => bounds.extend([c.lng, c.lat]));
+  const pct = Math.max(0, Math.min(40, Number(state.padding) ?? 8));
+  const w = document.getElementById('map-area').clientWidth;
+  const h = document.getElementById('map-area').clientHeight;
+  const pad = {
+    top: h * pct / 100,
+    bottom: h * pct / 100,
+    left: w * pct / 100,
+    right: w * pct / 100
+  };
+  map.fitBounds(bounds, { padding: pad, duration: 600, maxZoom: 13 });
+}
+
+function getCurveControls(from, to, curvePct) {
+  const dx = to.x - from.x;
+  const dy = to.y - from.y;
+  const len = Math.sqrt(dx*dx + dy*dy) || 1;
+  const nx = -dy / len;
+  const ny = dx / len;
+
+  // curvePct = pourcentage de la longueur du trajet (-100 à 100)
+  const rawOffset = len * ((curvePct || 0) / 100);
+
+  // IMPORTANT : pour les très longs trajets (vols internationaux qui sortent largement
+  // de la carte), on limite l'amplitude perpendiculaire à ~1.3× la hauteur visible.
+  // Sinon l'arc passe loin au-dessus de la carte et on ne voit que les bouts (quasi-droits).
+  const mapArea = document.getElementById('map-area');
+  const viewportH = mapArea ? mapArea.clientHeight : 600;
+  const maxOffset = viewportH * 1.3;
+  const curveAbs = Math.sign(rawOffset) * Math.min(Math.abs(rawOffset), maxOffset);
+
+  // Points de contrôle à 30% et 70% de la corde, perpendiculaires
+  // Plus proches du centre que 0.25/0.75 = courbe plus ronde et arc plus haut
+  const x1 = from.x + dx * 0.3;
+  const y1 = from.y + dy * 0.3;
+  const x2 = from.x + dx * 0.7;
+  const y2 = from.y + dy * 0.7;
+  return {
+    c1: { x: x1 + nx * curveAbs, y: y1 + ny * curveAbs },
+    c2: { x: x2 + nx * curveAbs, y: y2 + ny * curveAbs }
+  };
+}
+
+// Position sur une courbe Bézier cubique à un paramètre t (0 → 1)
+function pointOnCubic(p0, c1, c2, p3, t) {
+  const u = 1 - t;
+  return {
+    x: u*u*u * p0.x + 3*u*u*t * c1.x + 3*u*t*t * c2.x + t*t*t * p3.x,
+    y: u*u*u * p0.y + 3*u*u*t * c1.y + 3*u*t*t * c2.y + t*t*t * p3.y
+  };
+}
+
+// Angle de la tangente à une courbe Bézier cubique au paramètre t
+function cubicAngle(p0, c1, c2, p3, t) {
+  const u = 1 - t;
+  const dx = 3*u*u*(c1.x - p0.x) + 6*u*t*(c2.x - c1.x) + 3*t*t*(p3.x - c2.x);
+  const dy = 3*u*u*(c1.y - p0.y) + 6*u*t*(c2.y - c1.y) + 3*t*t*(p3.y - c2.y);
+  return Math.atan2(dy, dx) * 180 / Math.PI;
+}
+
+// Gardé pour compat - ne sert plus mais évite les erreurs si appelé
+function getCurveControl(from, to, curvePct) {
+  const c = getCurveControls(from, to, curvePct);
+  return c.c1;
+}
+
+function pointOnCurve(from, ctrl, to, t) {
+  return {
+    x: (1-t)**2 * from.x + 2*(1-t)*t*ctrl.x + t**2*to.x,
+    y: (1-t)**2 * from.y + 2*(1-t)*t*ctrl.y + t**2*to.y
+  };
+}
+
+function curveAngle(from, ctrl, to, t) {
+  const dx = 2*(1-t)*(ctrl.x - from.x) + 2*t*(to.x - ctrl.x);
+  const dy = 2*(1-t)*(ctrl.y - from.y) + 2*t*(to.y - ctrl.y);
+  return Math.atan2(dy, dx) * 180 / Math.PI;
+}
+
+// Calcule une courbure auto (en pourcentage) pour éviter que des trajets aller-retour se chevauchent
+function autoCurve(routeIndex) {
+  const r = state.routes[routeIndex];
+  // cherche s'il existe un trajet inverse
+  const reverseIdx = state.routes.findIndex((other, i) =>
+    i !== routeIndex && other.from === r.to && other.to === r.from
+  );
+  if (reverseIdx === -1) return 0;
+  // l'un courbe d'un côté, l'autre de l'autre (15% de chaque côté)
+  return reverseIdx > routeIndex ? 15 : -15;
+}
+
+function drawOverlay() {
+  if (!map) return;
+  const svg = document.getElementById('overlay');
+  const w = document.getElementById('map-area').clientWidth;
+  const h = document.getElementById('map-area').clientHeight;
+  svg.setAttribute('width', w);
+  svg.setAttribute('height', h);
+  svg.setAttribute('viewBox', `0 0 ${w} ${h}`);
+  svg.innerHTML = '';
+
+  // pré-calcul : détecter les paires "aller-retour avion" sur la même ville
+  // ex: France→Naples (avion) ET Naples→France (avion) → on regroupe les avions près de Naples
+  const planePositions = {}; // index route → t (position sur la courbe)
+  const pairedRoutes = new Set();
+
+  state.routes.forEach((r, i) => {
+    if (r.transport !== 'avion') return;
+    if (pairedRoutes.has(i)) return;
+    // cherche le trajet avion miroir (arrivée = départ de l'autre, et vice-versa)
+    const mirrorIdx = state.routes.findIndex((other, j) =>
+      j !== i &&
+      other.transport === 'avion' &&
+      other.from === r.to &&
+      other.to === r.from
+    );
+    if (mirrorIdx !== -1) {
+      // i = vol arrivée, mirrorIdx = vol retour
+      // les deux pictos doivent être proches de la ville pivot (visible sur la carte)
+      planePositions[i] = 0.94;        // arrivée : avion très proche de la destination
+      planePositions[mirrorIdx] = 0.06; // départ retour : avion très proche du point de départ (= même hub)
+      pairedRoutes.add(i);
+      pairedRoutes.add(mirrorIdx);
+    } else {
+      // vol simple → avion placé très près de la destination
+      planePositions[i] = 0.92;
+    }
+  });
+
+  // tracés
+  state.routes.forEach((r, i) => {
+    const from = state.cities.find(c => c.id === r.from);
+    const to = state.cities.find(c => c.id === r.to);
+    if (!from || !to) return;
+    const p1 = map.project([from.lng, from.lat]);
+    const p2 = map.project([to.lng, to.lat]);
+    const curve = (r.curve !== undefined && r.curve !== null) ? r.curve : autoCurve(i);
+    const ctrls = getCurveControls(p1, p2, curve);
+    const style = TRANSPORT_STYLES[r.transport] || TRANSPORT_STYLES.voiture;
+
+    // Longueur approximative de la courbe (distance entre points + extension liée à la courbure)
+    const dx = p2.x - p1.x;
+    const dy = p2.y - p1.y;
+    const length = Math.sqrt(dx*dx + dy*dy) * (1 + Math.abs(curve) / 200);
+
+    // Pattern selon charte TL : points pour l'avion, tirets uniformes pour tous les autres modes
+    const sf = state.spacingFactor || 1;
+    const sw = state.strokeWidth || 5;
+    let dashArray;
+    if (style.dash === 'dots') {
+      // POINTS pour l'avion : dash très court + linecap round = cercles
+      // (le `1` devient un point rond visible grâce au linecap)
+      dashArray = `1 ${14 * sf}`;
+    } else {
+      // Tirets uniformes pour tous les autres modes (charte TL)
+      dashArray = `${12 * sf} ${8 * sf}`;
+    }
+
+    const pathD = `M ${p1.x} ${p1.y} C ${ctrls.c1.x} ${ctrls.c1.y}, ${ctrls.c2.x} ${ctrls.c2.y}, ${p2.x} ${p2.y}`;
+
+    if (style.dash === 'mixed' && style.mixedWith) {
+      // Mode mixte (ex: train + ferry) : on dessine 2 paths colorés avec patterns décalés
+      // qui alternent visuellement le long du trajet
+      const secondStyle = TRANSPORT_STYLES[style.mixedWith];
+      const segLen = 16 * sf; // longueur d'un segment colore
+      const gap = 4 * sf;      // petit espace entre segments
+      const period = (segLen + gap) * 2;
+      // Trait #1 (train) : visible sur [0, segLen]
+      const p1path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      p1path.setAttribute('d', pathD);
+      p1path.setAttribute('stroke', style.color);
+      p1path.setAttribute('stroke-width', String(sw));
+      p1path.setAttribute('stroke-dasharray', `${segLen} ${period - segLen}`);
+      p1path.setAttribute('stroke-linecap', 'round');
+      p1path.setAttribute('fill', 'none');
+      svg.appendChild(p1path);
+      // Trait #2 (ferry) : visible sur [segLen + gap, segLen*2 + gap]
+      const p2path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      p2path.setAttribute('d', pathD);
+      p2path.setAttribute('stroke', secondStyle.color);
+      p2path.setAttribute('stroke-width', String(sw));
+      p2path.setAttribute('stroke-dasharray', `${segLen} ${period - segLen}`);
+      p2path.setAttribute('stroke-dashoffset', String(-(segLen + gap)));
+      p2path.setAttribute('stroke-linecap', 'round');
+      p2path.setAttribute('fill', 'none');
+      svg.appendChild(p2path);
+    } else {
+      const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      path.setAttribute('d', pathD);
+      path.setAttribute('stroke', style.color);
+      path.setAttribute('stroke-width', String(sw));
+      path.setAttribute('stroke-dasharray', dashArray);
+      path.setAttribute('stroke-linecap', 'round');
+      path.setAttribute('fill', 'none');
+      svg.appendChild(path);
+    }
+
+    // FLÈCHES DE SENS (charte TL) : sauf pour avion qui a déjà son picto
+    // Et seulement si r.showArrow n'est pas explicitement à false (default = activé)
+    // Pour mode simple : 1 flèche au milieu (t=0.5)
+    // Pour mode mixte : 2 flèches (t=0.3 et t=0.7) chacune dans la couleur de son mode
+    if (!style.plane && r.showArrow !== false) {
+      const arrowPositions = (style.dash === 'mixed' && style.mixedWith)
+        ? [{t: 0.3, color: style.color}, {t: 0.7, color: TRANSPORT_STYLES[style.mixedWith].color}]
+        : [{t: 0.5, color: style.color}];
+
+      arrowPositions.forEach(({t, color}) => {
+        const pt = pointOnCubic(p1, ctrls.c1, ctrls.c2, p2, t);
+        const ang = cubicAngle(p1, ctrls.c1, ctrls.c2, p2, t);
+        // Flèche de sens (forme image11 de la charte TL) : pointe à droite par défaut
+        // viewBox source 21.23 x 15.21, on scale à env. 14px de haut
+        const arrowScale = (state.arrowSize || 1.8) * (sw / 5); // multiplicateur réglable depuis le slider
+        const arrow = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+        // Points centrés sur (0,0) pour rotation facile
+        // Original: "0 15.21 4.2 7.84 .96 0 21.23 8.91 0 15.21"
+        // Recentré et scalé : pointe vers la droite, hauteur ~15
+        arrow.setAttribute('points', '-10.6,7.6 -6.4,0.2 -9.6,-7.6 10.6,1.3');
+        arrow.setAttribute('fill', color);
+        arrow.setAttribute('transform', `translate(${pt.x} ${pt.y}) rotate(${ang}) scale(${arrowScale})`);
+        svg.appendChild(arrow);
+      });
+    }
+
+    if (style.plane) {
+      // position : custom (drag manuel) ou auto
+      const t = (r.planeT != null) ? r.planeT : (planePositions[i] ?? 0.88);
+      const pt = pointOnCubic(p1, ctrls.c1, ctrls.c2, p2, t);
+      const ang = cubicAngle(p1, ctrls.c1, ctrls.c2, p2, t);
+
+      // Avion en SVG path natif (silhouette d'avion vu du dessus, pointant vers le haut)
+      // Rotation = ang + 90 pour orienter la pointe dans le sens du trajet
+      const plane = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      plane.setAttribute('d', 'M 0 -16 L 4 -3 L 18 0 L 18 4 L 4 4 L 4 13 L 7 16 L 7 18 L 0 16 L -7 18 L -7 16 L -4 13 L -4 4 L -18 4 L -18 0 L -4 -3 Z');
+      plane.setAttribute('fill', style.color);
+      plane.setAttribute('transform', `translate(${pt.x} ${pt.y}) rotate(${ang + 90}) scale(1.3)`);
+      plane.setAttribute('class', 'draggable-plane');
+      plane.dataset.routeIndex = i;
+      plane.addEventListener('mousedown', (e) => startPlaneDrag(e, i));
+      svg.appendChild(plane);
+    }
+  });
+
+  // points et labels avec collision basique
+  const placed = []; // {x, y, w, h}
+  state.cities.forEach(c => {
+    const p = map.project([c.lng, c.lat]);
+
+    // point (charte TL : jaune #E9C000, contour blanc 2pt)
+    const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+    circle.setAttribute('cx', p.x);
+    circle.setAttribute('cy', p.y);
+    circle.setAttribute('r', '8');
+    circle.setAttribute('fill', '#E9C000');
+    circle.setAttribute('stroke', 'white');
+    circle.setAttribute('stroke-width', '2');
+    svg.appendChild(circle);
+
+    // label, en testant 8 positions autour du point (NE, E, SE, S, SW, W, NW, N)
+    const fontSize = state.labelSize || 18;
+    const charW = fontSize * 0.56;
+    const labelW = c.label.length * charW + 8;
+    const labelH = fontSize * 1.2;
+    // Espacement entre point et label, proportionnel à la taille
+    const offsetH = Math.max(14, fontSize * 0.7);
+    const offsetV = Math.max(10, fontSize * 0.5);
+    const positions = [
+      { dx: offsetH,  dy: 8,            anchor: 'start' },   // E
+      { dx: -offsetH, dy: 8,            anchor: 'end' },     // W
+      { dx: offsetH,  dy: -offsetV,     anchor: 'start' },   // NE
+      { dx: -offsetH, dy: -offsetV,     anchor: 'end' },     // NW
+      { dx: offsetH,  dy: offsetV + 12, anchor: 'start' },   // SE
+      { dx: -offsetH, dy: offsetV + 12, anchor: 'end' },     // SW
+      { dx: 0,        dy: -offsetV - 4, anchor: 'middle' },  // N
+      { dx: 0,        dy: offsetV + 18, anchor: 'middle' }   // S
+    ];
+
+    let chosen;
+    if (c.labelOffset) {
+      // offset manuel défini par l'utilisateur (drag)
+      chosen = c.labelOffset;
+    } else {
+      // auto : on choisit la première position qui ne chevauche pas
+      chosen = positions[0];
+      for (const pos of positions) {
+        const bx = p.x + pos.dx - (pos.anchor === 'end' ? labelW : pos.anchor === 'middle' ? labelW/2 : 0);
+        const by = p.y + pos.dy - labelH/2;
+        const collides = placed.some(r => !(bx + labelW < r.x || bx > r.x + r.w || by + labelH < r.y || by > r.y + r.h));
+        if (!collides) { chosen = pos; break; }
+      }
+    }
+    const bx = p.x + chosen.dx - (chosen.anchor === 'end' ? labelW : chosen.anchor === 'middle' ? labelW/2 : 0);
+    const by = p.y + chosen.dy - labelH/2;
+    placed.push({ x: bx, y: by, w: labelW, h: labelH });
+
+    // groupe pour le texte (drag)
+    const group = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+    group.setAttribute('class', 'draggable-label');
+    group.dataset.cityId = c.id;
+
+    // texte uniquement (charte TL : pas de halo blanc autour des labels villes)
+    const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    label.setAttribute('x', p.x + chosen.dx);
+    label.setAttribute('y', p.y + chosen.dy);
+    label.setAttribute('fill', '#004E7F');
+    label.setAttribute('font-size', String(fontSize));
+    label.setAttribute('font-weight', '500');
+    label.setAttribute('font-family', 'Montserrat, Arial, Helvetica, sans-serif');
+    label.setAttribute('text-anchor', chosen.anchor);
+    label.textContent = c.label;
+    group.appendChild(label);
+
+    // drag handler
+    group.addEventListener('mousedown', (e) => startLabelDrag(e, c.id));
+
+    svg.appendChild(group);
+  });
+
+  // === ANNOTATIONS (textes libres ou pictos vagues seuls) ===
+  (state.annotations || []).forEach(a => {
+    const p = map.project([a.lng, a.lat]);
+    const annotGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+    annotGroup.setAttribute('class', 'draggable-annotation');
+    annotGroup.dataset.annotationId = a.id;
+    annotGroup.style.cursor = 'grab';
+
+    // Halo dans la couleur opposée pour la lisibilité (texte clair → halo sombre, et inversement)
+    const isLight = isColorLight(a.color);
+    const haloColor = isLight ? 'rgba(20,50,100,0.7)' : 'rgba(255,255,255,0.85)';
+
+    // === TEXTE (seulement si a.text non vide — sinon c'est un picto vagues seul) ===
+    let txt = null;
+    if (a.text) {
+      const halo = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+      halo.setAttribute('x', p.x);
+      halo.setAttribute('y', p.y);
+      halo.setAttribute('fill', 'none');
+      halo.setAttribute('stroke', haloColor);
+      halo.setAttribute('stroke-width', String(Math.max(3, a.fontSize * 0.18)));
+      halo.setAttribute('stroke-linejoin', 'round');
+      halo.setAttribute('font-size', String(a.fontSize));
+      halo.setAttribute('font-style', a.italic ? 'italic' : 'normal');
+      halo.setAttribute('font-weight', '500');
+      halo.setAttribute('font-family', 'Montserrat, Arial, Helvetica, sans-serif');
+      halo.setAttribute('text-anchor', 'middle');
+      halo.setAttribute('dominant-baseline', 'middle');
+      halo.setAttribute('letter-spacing', '1.5');
+      halo.textContent = a.text;
+      annotGroup.appendChild(halo);
+
+      txt = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+      txt.setAttribute('x', p.x);
+      txt.setAttribute('y', p.y);
+      txt.setAttribute('fill', a.color);
+      txt.setAttribute('font-size', String(a.fontSize));
+      txt.setAttribute('font-style', a.italic ? 'italic' : 'normal');
+      txt.setAttribute('font-weight', '500');
+      txt.setAttribute('font-family', 'Montserrat, Arial, Helvetica, sans-serif');
+      txt.setAttribute('text-anchor', 'middle');
+      txt.setAttribute('dominant-baseline', 'middle');
+      txt.setAttribute('letter-spacing', '1.5');
+      txt.textContent = a.text;
+      annotGroup.appendChild(txt);
+    } // fin if (a.text)
+
+    // Si pas de texte (= picto vagues seul), ajouter un rectangle transparent
+    // pour donner une zone cliquable au drag
+    if (!a.text && a.waves) {
+      const u = (a.fontSize * 1.0) / 4;
+      const dragRect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+      dragRect.setAttribute('x', p.x - u * 3);
+      dragRect.setAttribute('y', p.y - a.fontSize * 2.5);
+      dragRect.setAttribute('width', u * 6);
+      dragRect.setAttribute('height', a.fontSize * 2.5);
+      dragRect.setAttribute('fill', 'transparent');
+      dragRect.setAttribute('pointer-events', 'all');
+      annotGroup.appendChild(dragRect);
+    }
+
+    // Picto vagues optionnel (style référence Corée : trois lignes ondulées au-dessus du texte)
+    // Couleur dédiée aux vagues (charte TL : jaune par défaut) ou couleur du texte si non définie
+    if (a.waves) {
+      const waveColor = a.waveColor || a.color;
+      const waveSize = a.fontSize * 1.0;       // largeur de la vague (plus grande)
+      const waveY = p.y - a.fontSize * 1.5;    // distance au-dessus du texte (plus éloigné)
+      const u = waveSize / 4;
+      const wavePath = `M ${-u*2} 0 q ${u} ${-u} ${u*2} 0 t ${u*2} 0`;
+      const strokeW = Math.max(2, a.fontSize * 0.13);
+      const haloW = strokeW * 2.2;
+      // Halo dérive de la couleur des vagues (pas du texte), pour adaptation correcte
+      const waveIsLight = isColorLight(waveColor);
+      const haloColor = waveIsLight ? 'rgba(20,50,100,0.7)' : 'rgba(255,255,255,0.85)';
+      const spacing = u * 1.6; // espacement entre les 3 lignes
+
+      for (let k = 0; k < 3; k++) {
+        const yPos = waveY + k * spacing;
+
+        // (charte TL : pas de halo / contour autour des vagues, juste le trait coloré)
+        // vague colorée seulement
+        const w = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        w.setAttribute('d', wavePath);
+        w.setAttribute('stroke', waveColor);
+        w.setAttribute('stroke-width', String(strokeW));
+        w.setAttribute('fill', 'none');
+        w.setAttribute('stroke-linecap', 'round');
+        w.setAttribute('transform', `translate(${p.x} ${yPos})`);
+        annotGroup.insertBefore(w, txt);
+      }
+    }
+
+    annotGroup.addEventListener('mousedown', (e) => startAnnotationDrag(e, a.id));
+
+    svg.appendChild(annotGroup);
+  });
+}
+
+// Détecte si une couleur hex est "claire" (proche du blanc) pour choisir le halo
+function isColorLight(hex) {
+  if (!hex || hex.length < 7) return false;
+  const r = parseInt(hex.slice(1,3), 16);
+  const g = parseInt(hex.slice(3,5), 16);
+  const b = parseInt(hex.slice(5,7), 16);
+  // Luminance perceptuelle approximative
+  return (0.299 * r + 0.587 * g + 0.114 * b) > 170;
+}
+
+// === DRAG ANNOTATION ===
+let annotationDragState = null;
+function startAnnotationDrag(e, annotId) {
+  e.stopPropagation();
+  e.preventDefault();
+  // Désactive le panning de la carte pendant le drag pour éviter les conflits
+  if (map) {
+    map.dragPan.disable();
+    map.boxZoom.disable();
+  }
+  annotationDragState = { annotId };
+  document.addEventListener('mousemove', onAnnotationDragMove);
+  document.addEventListener('mouseup', onAnnotationDragEnd);
+}
+function onAnnotationDragMove(e) {
+  if (!annotationDragState) return;
+  const a = state.annotations.find(x => x.id === annotationDragState.annotId);
+  if (!a) return;
+  const mapArea = document.getElementById('map-area');
+  const rect = mapArea.getBoundingClientRect();
+  const mx = e.clientX - rect.left;
+  const my = e.clientY - rect.top;
+  const ll = map.unproject([mx, my]);
+  a.lng = ll.lng;
+  a.lat = ll.lat;
+  drawOverlay();
+}
+function onAnnotationDragEnd() {
+  annotationDragState = null;
+  // Réactive le panning de la carte
+  if (map) {
+    map.dragPan.enable();
+    map.boxZoom.enable();
+  }
+  document.removeEventListener('mousemove', onAnnotationDragMove);
+  document.removeEventListener('mouseup', onAnnotationDragEnd);
+}
+
+// === DRAG LABEL ===
+let labelDragState = null;
+
+function startLabelDrag(e, cityId) {
+  const c = state.cities.find(x => x.id === cityId);
+  if (!c) return;
+  const p = map.project([c.lng, c.lat]);
+  // récupère l'offset courant (custom ou par défaut)
+  const current = c.labelOffset || { dx: 14, dy: 5, anchor: 'start' };
+  labelDragState = {
+    cityId,
+    startX: e.clientX,
+    startY: e.clientY,
+    startDx: current.dx,
+    startDy: current.dy,
+    anchor: current.anchor
+  };
+  e.stopPropagation();
+  e.preventDefault();
+}
+
+function onLabelMouseMove(e) {
+  if (!labelDragState) return;
+  const c = state.cities.find(x => x.id === labelDragState.cityId);
+  if (!c) return;
+  const newDx = labelDragState.startDx + (e.clientX - labelDragState.startX);
+  const newDy = labelDragState.startDy + (e.clientY - labelDragState.startY);
+  c.labelOffset = { dx: newDx, dy: newDy, anchor: labelDragState.anchor };
+  drawOverlay();
+}
+
+function endLabelDrag() {
+  labelDragState = null;
+}
+
+function resetLabelPosition(cityId) {
+  const c = state.cities.find(x => x.id === cityId);
+  if (!c) return;
+  delete c.labelOffset;
+  drawOverlay();
+  renderCities();
+}
+
+// === DRAG PLANE (le long de la courbe) ===
+let planeDragState = null;
+
+function startPlaneDrag(e, routeIndex) {
+  planeDragState = { routeIndex };
+  e.stopPropagation();
+  e.preventDefault();
+}
+
+function onPlaneMouseMove(e) {
+  if (!planeDragState) return;
+  const r = state.routes[planeDragState.routeIndex];
+  if (!r) return;
+  const from = state.cities.find(c => c.id === r.from);
+  const to = state.cities.find(c => c.id === r.to);
+  if (!from || !to) return;
+
+  // récupère les coords souris dans le repère du SVG overlay
+  const svg = document.getElementById('overlay');
+  const rect = svg.getBoundingClientRect();
+  const mx = e.clientX - rect.left;
+  const my = e.clientY - rect.top;
+
+  // recalcule la courbe actuelle
+  const p1 = map.project([from.lng, from.lat]);
+  const p2 = map.project([to.lng, to.lat]);
+  const curve = (r.curve !== undefined && r.curve !== null) ? r.curve : autoCurve(planeDragState.routeIndex);
+  const ctrls = getCurveControls(p1, p2, curve);
+
+  // trouve le t le plus proche de la souris (échantillonnage sur courbe cubique)
+  let bestT = 0.5;
+  let bestDist = Infinity;
+  for (let i = 0; i <= 100; i++) {
+    const t = i / 100;
+    const pt = pointOnCubic(p1, ctrls.c1, ctrls.c2, p2, t);
+    const d = (pt.x - mx) ** 2 + (pt.y - my) ** 2;
+    if (d < bestDist) {
+      bestDist = d;
+      bestT = t;
+    }
+  }
+  // clamp pour éviter que l'avion soit sur le point de départ ou d'arrivée exact
+  // Plus de clamp : l'avion peut aller du tout début à la toute fin du trajet
+  r.planeT = Math.max(0, Math.min(1, bestT));
+  drawOverlay();
+}
+
+function endPlaneDrag() {
+  if (planeDragState) {
+    planeDragState = null;
+    renderRoutes(); // pour rafraîchir l'indicateur "déplacé"
+  }
+}
+
+function resetPlanePosition(routeIndex) {
+  const r = state.routes[routeIndex];
+  if (!r) return;
+  delete r.planeT;
+  drawOverlay();
+  renderRoutes();
+}
+
+/* ============================================================
+   EXPORT PNG HAUTE RÉSOLUTION
+   ============================================================ */
+function buildLegendSvg(w, h) {
+  const xmlns = 'http://www.w3.org/2000/svg';
+  const g = document.createElementNS(xmlns, 'g');
+
+  // Filtre selon les transports réellement utilisés (CHARTE TL : couleurs officielles, pictos officiels)
+  const usedTransports = new Set(state.routes.map(r => r.transport));
+  const allItems = [
+    { key: 'avion',        color: '#F55C5D', pictoKey: 'avion',   isDots: true  },
+    { key: 'voiture',      color: '#004D7B', pictoKey: 'voiture', isDots: false },
+    { key: 'train',        color: '#4B5563', pictoKey: 'train',   isDots: false },
+    { key: 'ferry',        color: '#00A299', pictoKey: 'ferry',   isDots: false },
+    { key: 'autocar',      color: '#B03D8E', pictoKey: 'autocar', isDots: false },
+    { key: 'train-ferry',  color: '#4B5563', pictoKey: null,      isDots: false, mixedColor: '#00A299', mixedPictoKeys: ['train', 'ferry'] }
+  ];
+  const items = allItems.filter(i => usedTransports.has(i.key));
+
+  if (items.length === 0) return g;
+
+  // Tailles généreuses pour l'export PNG
+  const padding = 26;
+  const lineH = 44;
+  const boxW = 180;
+  const boxH = items.length * lineH + 64;
+  const x = w - boxW - 30;
+  const y = h - boxH - 30;
+
+  // fond blanc
+  const rect = document.createElementNS(xmlns, 'rect');
+  rect.setAttribute('x', x);
+  rect.setAttribute('y', y);
+  rect.setAttribute('width', boxW);
+  rect.setAttribute('height', boxH);
+  rect.setAttribute('fill', 'white');
+  rect.setAttribute('rx', '10');
+  rect.setAttribute('stroke', '#e5e5e4');
+  rect.setAttribute('stroke-width', '1');
+  g.appendChild(rect);
+
+  items.forEach((item, i) => {
+    const lineY = y + padding + i * lineH + 14;
+
+    // === TIRET / POINTS ===
+    if (item.mixedColor) {
+      // Mode mixte : 2 tirets côte à côte
+      const dash1 = document.createElementNS(xmlns, 'line');
+      dash1.setAttribute('x1', x + padding);
+      dash1.setAttribute('y1', lineY);
+      dash1.setAttribute('x2', x + padding + 28);
+      dash1.setAttribute('y2', lineY);
+      dash1.setAttribute('stroke', item.color);
+      dash1.setAttribute('stroke-width', '5');
+      dash1.setAttribute('stroke-dasharray', '10 4');
+      dash1.setAttribute('stroke-linecap', 'round');
+      g.appendChild(dash1);
+      const dash2 = document.createElementNS(xmlns, 'line');
+      dash2.setAttribute('x1', x + padding + 36);
+      dash2.setAttribute('y1', lineY);
+      dash2.setAttribute('x2', x + padding + 64);
+      dash2.setAttribute('y2', lineY);
+      dash2.setAttribute('stroke', item.mixedColor);
+      dash2.setAttribute('stroke-width', '5');
+      dash2.setAttribute('stroke-dasharray', '10 4');
+      dash2.setAttribute('stroke-linecap', 'round');
+      g.appendChild(dash2);
+    } else {
+      const dash = document.createElementNS(xmlns, 'line');
+      dash.setAttribute('x1', x + padding);
+      dash.setAttribute('y1', lineY);
+      dash.setAttribute('x2', x + padding + 64);
+      dash.setAttribute('y2', lineY);
+      dash.setAttribute('stroke', item.color);
+      dash.setAttribute('stroke-width', '5');
+      // Avion = points (dash très court + linecap round), autres = tirets uniformes
+      dash.setAttribute('stroke-dasharray', item.isDots ? '1 10' : '12 6');
+      dash.setAttribute('stroke-linecap', 'round');
+      g.appendChild(dash);
+    }
+
+    // === PICTO OFFICIEL (au lieu du texte) — SVG NATIF (pas de foreignObject pour éviter le tainted canvas) ===
+    const pictoSize = 28;
+    const pictoX = x + padding + 80;
+    const pictoY = lineY - pictoSize / 2;
+
+    const pictoKeys = item.mixedPictoKeys || [item.pictoKey];
+    pictoKeys.forEach((key, idx) => {
+      const offsetX = pictoKeys.length > 1 ? idx * (pictoSize + 4) : 0;
+      const pictoSrc = OFFICIAL_PICTOS[key];
+      if (!pictoSrc) return;
+
+      // Détecter si c'est un <img> base64 (PNG) ou un <svg> inline
+      const imgMatch = pictoSrc.match(/src="(data:image\/[^"]+)"/);
+      if (imgMatch) {
+        // PNG base64 (voiture, autocar) → <image> SVG natif
+        const img = document.createElementNS(xmlns, 'image');
+        img.setAttribute('href', imgMatch[1]);
+        img.setAttributeNS('http://www.w3.org/1999/xlink', 'xlink:href', imgMatch[1]);
+        img.setAttribute('x', pictoX + offsetX);
+        img.setAttribute('y', pictoY);
+        img.setAttribute('width', pictoSize);
+        img.setAttribute('height', pictoSize);
+        img.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+        g.appendChild(img);
+      } else {
+        // SVG inline (avion, train, ferry) → on extrait viewBox + paths et on les insère natif
+        const vbMatch = pictoSrc.match(/viewBox="([\d.\s-]+)"/);
+        const vb = vbMatch ? vbMatch[1].split(/\s+/).map(Number) : [0, 0, 24, 24];
+        const [vbX, vbY, vbW, vbH] = vb;
+        const scale = pictoSize / Math.max(vbW, vbH);
+        const innerX = pictoX + offsetX + (pictoSize - vbW * scale) / 2;
+        const innerY = pictoY + (pictoSize - vbH * scale) / 2;
+
+        const pictoG = document.createElementNS(xmlns, 'g');
+        pictoG.setAttribute('transform', `translate(${innerX} ${innerY}) scale(${scale}) translate(${-vbX} ${-vbY})`);
+
+        // Extraire tous les <path d="..." fill="..."/> du SVG source
+        const pathRegex = /<path\s+([^>]*?)\/>/g;
+        let pathMatch;
+        while ((pathMatch = pathRegex.exec(pictoSrc)) !== null) {
+          const attrs = pathMatch[1];
+          const dMatch = attrs.match(/d="([^"]+)"/);
+          const fillMatch = attrs.match(/fill="([^"]+)"/);
+          if (dMatch) {
+            const path = document.createElementNS(xmlns, 'path');
+            path.setAttribute('d', dMatch[1]);
+            path.setAttribute('fill', fillMatch ? fillMatch[1] : '#000');
+            pictoG.appendChild(path);
+          }
+        }
+        g.appendChild(pictoG);
+      }
+    });
+  });
+
+  // Note "Carte non exhaustive" gardée
+  const note = document.createElementNS(xmlns, 'text');
+  note.setAttribute('x', x + boxW / 2);
+  note.setAttribute('y', y + boxH - 18);
+  note.setAttribute('fill', '#9ca3af');
+  note.setAttribute('font-size', '14');
+  note.setAttribute('text-anchor', 'middle');
+  note.setAttribute('font-family', 'Montserrat, Arial, Helvetica, sans-serif');
+  note.textContent = 'Carte non exhaustive';
+  g.appendChild(note);
+
+  return g;
+}
+
+async function exportPNG(mode = 'download') {
+  if (!map) { alert('La carte n\'est pas chargée.'); return; }
+
+  const format = document.getElementById('exportFormat').value;
+  const fileType = document.getElementById('exportFileType').value; // 'jpeg' ou 'png'
+  const jpegQuality = Number(document.getElementById('jpegQualityRange').value) / 100;
+  const mapArea = document.getElementById('map-area');
+
+  // Tailles cibles selon le format choisi
+  let targetW = null, targetH = null;
+  if (format === 'site-1440') { targetW = 1440; targetH = 960; }
+  else if (format === 'site-1080') { targetW = 1080; targetH = 720; }
+  else if (format === 'site-2160') { targetW = 2160; targetH = 1440; }
+
+  // Affiche un overlay "Export en cours..."
+  const loader = document.createElement('div');
+  loader.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.4);z-index:9999;display:flex;align-items:center;justify-content:center;color:white;font-size:18px;font-weight:600';
+  loader.textContent = mode === 'preview' ? 'Génération aperçu...' : 'Export en cours...';
+  document.body.appendChild(loader);
+
+  // Helper pour attendre que la carte ait fini de rendre et que les tuiles soient chargées
+  function waitForMap(ms = 100) {
+    return new Promise(resolve => {
+      const check = () => {
+        if (map.areTilesLoaded() && map.isStyleLoaded()) {
+          // un dernier render pour être sûr
+          map.once('render', () => setTimeout(resolve, ms));
+          map.triggerRepaint();
+        } else {
+          setTimeout(check, 100);
+        }
+      };
+      check();
+    });
+  }
+
+  // Sauvegarde la taille actuelle si on doit redimensionner
+  let savedSize = null;
+  if (targetW && targetH) {
+    savedSize = { w: mapArea.style.width, h: mapArea.style.height };
+    mapArea.style.width = targetW + 'px';
+    mapArea.style.height = targetH + 'px';
+    map.resize();
+
+    // Recadrer si mode auto
+    if (state.cadrage === 'auto') {
+      const visibleForBounds = state.cities.filter(c => !c.excludeFromBounds);
+      if (visibleForBounds.length >= 2) {
+        const bounds = new maplibregl.LngLatBounds();
+        visibleForBounds.forEach(c => bounds.extend([c.lng, c.lat]));
+        const cam = map.cameraForBounds(bounds, { padding: 80, maxZoom: 13 });
+        if (cam) map.jumpTo(cam);
+      }
+    }
+
+    // Attendre que la carte recharge les tuiles à la nouvelle taille
+    await waitForMap(300);
+  }
+
+  // Force un rendu et attend qu'il soit terminé
+  await new Promise(resolve => {
+    map.once('render', resolve);
+    map.triggerRepaint();
+  });
+
+  // Redessine l'overlay aux dimensions actuelles
+  drawOverlay();
+
+  try {
+    const mapCanvas = map.getCanvas();
+    const w = mapCanvas.width;
+    const h = mapCanvas.height;
+
+    const finalCanvas = document.createElement('canvas');
+    finalCanvas.width = w;
+    finalCanvas.height = h;
+    const ctx = finalCanvas.getContext('2d');
+
+    // Fond blanc de sécurité
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, w, h);
+
+    // Capture la carte WebGL immédiatement après le rendu
+    ctx.drawImage(mapCanvas, 0, 0);
+
+    // Overlay SVG : on clone et on ajoute la légende dedans
+    const overlay = document.getElementById('overlay');
+    const overlayClone = overlay.cloneNode(true);
+    const overlayW = parseFloat(overlay.getAttribute('width'));
+    const overlayH = parseFloat(overlay.getAttribute('height'));
+    overlayClone.setAttribute('width', overlayW);
+    overlayClone.setAttribute('height', overlayH);
+
+    const legend = buildLegendSvg(overlayW, overlayH);
+    overlayClone.appendChild(legend);
+
+    const svgData = new XMLSerializer().serializeToString(overlayClone);
+    const svgBlob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
+    const url = URL.createObjectURL(svgBlob);
+
+    await new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => {
+        ctx.drawImage(img, 0, 0, w, h);
+        URL.revokeObjectURL(url);
+        resolve();
+      };
+      img.onerror = () => {
+        URL.revokeObjectURL(url);
+        reject(new Error('Erreur conversion overlay'));
+      };
+      img.src = url;
+    });
+
+    // Download : JPEG ou PNG selon le choix
+    const mimeType = fileType === 'jpeg' ? 'image/jpeg' : 'image/png';
+    const fileExt = fileType === 'jpeg' ? 'jpg' : 'png';
+    await new Promise(resolve => {
+      finalCanvas.toBlob((blob) => {
+        if (!blob) { alert('Erreur lors de l\'export.'); resolve(); return; }
+        const dlUrl = URL.createObjectURL(blob);
+
+        if (mode === 'preview') {
+          // Mode aperçu : affiche dans une modale avec deux options
+          showPreviewModal(dlUrl, blob.size, fileExt, mimeType);
+        } else {
+          // Mode téléchargement classique
+          const link = document.createElement('a');
+          link.download = (state.name || 'carte-voyage').replace(/[^a-z0-9-_]/gi, '_') + '.' + fileExt;
+          link.href = dlUrl;
+          link.click();
+          setTimeout(() => URL.revokeObjectURL(dlUrl), 100);
+        }
+        resolve();
+      }, mimeType, jpegQuality);
+    });
+
+  } catch(e) {
+    console.error(e);
+    alert('Erreur lors de l\'export : ' + e.message);
+  } finally {
+    // Restaurer la taille
+    if (savedSize) {
+      mapArea.style.width = savedSize.w;
+      mapArea.style.height = savedSize.h;
+      map.resize();
+      if (state.cadrage === 'auto') fitToBounds();
+    }
+    loader.remove();
+  }
+}
+
+function showPreviewModal(imgUrl, sizeBytes, fileExt, mimeType) {
+  // Calcule taille lisible
+  const sizeKb = (sizeBytes / 1024).toFixed(0);
+  const sizeStr = sizeKb > 1000 ? (sizeKb / 1024).toFixed(2) + ' Mo' : sizeKb + ' ko';
+
+  const overlay = document.createElement('div');
+  overlay.style.cssText = `
+    position: fixed; inset: 0; background: rgba(0,0,0,0.75);
+    z-index: 10000; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; padding: 30px; gap: 16px;
+  `;
+
+  const title = document.createElement('div');
+  title.style.cssText = 'color:white;font-size:18px;font-weight:600;text-align:center';
+  title.innerHTML = `Aperçu de l'export &mdash; <span style="font-weight:400;color:#cbd5e1">${sizeStr}</span>`;
+
+  const img = document.createElement('img');
+  img.src = imgUrl;
+  img.style.cssText = 'max-width:90%;max-height:75vh;border-radius:8px;box-shadow:0 12px 40px rgba(0,0,0,0.4);background:white';
+
+  const btnRow = document.createElement('div');
+  btnRow.style.cssText = 'display:flex;gap:12px';
+
+  const btnDl = document.createElement('button');
+  btnDl.textContent = '⬇ Télécharger';
+  btnDl.style.cssText = 'background:#1a4a75;color:white;border:none;padding:10px 24px;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer';
+  btnDl.onclick = () => {
+    const link = document.createElement('a');
+    link.download = (state.name || 'carte-voyage').replace(/[^a-z0-9-_]/gi, '_') + '.' + fileExt;
+    link.href = imgUrl;
+    link.click();
+  };
+
+  const btnClose = document.createElement('button');
+  btnClose.textContent = 'Fermer et ajuster';
+  btnClose.style.cssText = 'background:white;color:#1a4a75;border:1px solid white;padding:10px 24px;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer';
+  btnClose.onclick = () => {
+    URL.revokeObjectURL(imgUrl);
+    overlay.remove();
+  };
+
+  btnRow.appendChild(btnDl);
+  btnRow.appendChild(btnClose);
+  overlay.appendChild(title);
+  overlay.appendChild(img);
+  overlay.appendChild(btnRow);
+
+  // Fermer aussi sur clic en dehors de l'image
+  overlay.addEventListener('click', (e) => {
+    if (e.target === overlay) {
+      URL.revokeObjectURL(imgUrl);
+      overlay.remove();
+    }
+  });
+
+  document.body.appendChild(overlay);
+}
+
+/* ============================================================
+   EXPORT / IMPORT JSON
+   ============================================================ */
+function exportJson() {
+  if (!state.name) { alert('Sauvegarde la carte d\'abord.'); return; }
+  const data = {
+    name: state.name,
+    title: state.title,
+    cities: state.cities,
+    routes: state.routes,
+    annotations: state.annotations || [],
+    cadrage: state.cadrage,
+    padding: state.padding,
+    labelSize: state.labelSize,
+    strokeWidth: state.strokeWidth,
+    spacingFactor: state.spacingFactor,
+    arrowSize: state.arrowSize
+  };
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = state.name.replace(/[^a-z0-9-_]/gi, '_') + '.json';
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function importJson(file) {
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    try {
+      const data = JSON.parse(e.target.result);
+      state = {
+        id: null,
+        name: data.name || 'Importée',
+        title: data.title || '',
+        cities: data.cities || [],
+        routes: data.routes || [],
+        annotations: data.annotations || [],
+        cadrage: data.cadrage || 'auto',
+        padding: data.padding ?? 8,
+        labelSize: data.labelSize ?? 18,
+        strokeWidth: data.strokeWidth ?? 5,
+        spacingFactor: data.spacingFactor ?? 1,
+        arrowSize: data.arrowSize ?? 1.8,
+        manualCenter: null,
+        manualZoom: null
+      };
+      syncFormFromState();
+      drawOverlay();
+      if (state.cadrage === 'auto') fitToBounds();
+    } catch(err) {
+      alert('Fichier invalide.');
+    }
+  };
+  reader.readAsText(file);
+}
+
+/* ============================================================
+   INIT
+   ============================================================ */
+function checkKey() {
+  const banner = document.getElementById('keyBanner');
+  banner.classList.toggle('show', !config.maptilerKey);
+}
+
+function init() {
+  loadConfig();
+  document.getElementById('maptilerKey').value = config.maptilerKey;
+  document.getElementById('mapStyle').value = config.mapStyle;
+  checkKey();
+
+  if (config.maptilerKey) {
+    initMap();
+  } else {
+    // affiche un fond vide en attendant la clé
+    document.getElementById('map').innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#888;font-size:14px">↖ Configure ta clé MapTiler à gauche pour afficher la carte</div>';
+  }
+
+  setupCitySearch();
+  renderSavedList();
+  syncFormFromState();
+
+  // listeners
+  document.getElementById('mapName').addEventListener('input', e => state.name = e.target.value);
+  document.getElementById('mapTitle').addEventListener('input', e => {
+    state.title = e.target.value;
+    document.getElementById('mapTitleDisplay').textContent = e.target.value;
+  });
+
+  document.getElementById('recadrerBtn').addEventListener('click', () => {
+    state.cadrage = 'auto';
+    fitToBounds();
+  });
+
+  // Sliders Apparence
+  document.getElementById('labelSizeRange').addEventListener('input', e => {
+    state.labelSize = Number(e.target.value);
+    document.getElementById('labelSizeVal').textContent = state.labelSize;
+    drawOverlay();
+  });
+  document.getElementById('strokeWidthRange').addEventListener('input', e => {
+    state.strokeWidth = Number(e.target.value);
+    document.getElementById('strokeWidthVal').textContent = state.strokeWidth;
+    drawOverlay();
+  });
+  document.getElementById('spacingRange').addEventListener('input', e => {
+    state.spacingFactor = Number(e.target.value);
+    document.getElementById('spacingVal').textContent = state.spacingFactor;
+    drawOverlay();
+  });
+  document.getElementById('arrowSizeRange').addEventListener('input', e => {
+    state.arrowSize = Number(e.target.value);
+    document.getElementById('arrowSizeVal').textContent = state.arrowSize;
+    drawOverlay();
+  });
+
+  // Slider qualité JPEG
+  document.getElementById('jpegQualityRange').addEventListener('input', e => {
+    document.getElementById('jpegQualityVal').textContent = e.target.value;
+  });
+
+  // Cacher le slider qualité quand on choisit PNG
+  document.getElementById('exportFileType').addEventListener('change', e => {
+    document.getElementById('jpegQualityField').style.display =
+      e.target.value === 'jpeg' ? '' : 'none';
+  });
+
+  // Bouton ajouter une annotation
+  document.getElementById('addAnnotationBtn').addEventListener('click', addAnnotation);
+  document.getElementById('addWavesBtn').addEventListener('click', addWavesOnly);
+
+  // Quand l'utilisateur bouge manuellement la carte, on passe en mode manuel
+  if (map) {
+    map.on('dragstart', () => { state.cadrage = 'manuel'; });
+  }
+
+  document.querySelectorAll('.pill[data-transport]').forEach(p => {
+    p.addEventListener('click', () => {
+      selectedTransport = p.dataset.transport;
+      document.querySelectorAll('.pill[data-transport]').forEach(x => x.classList.toggle('active', x === p));
+    });
+  });
+
+  document.getElementById('addRouteBtn').addEventListener('click', addRoute);
+  document.getElementById('saveBtn').addEventListener('click', saveCurrentMap);
+  document.getElementById('newMapBtn').addEventListener('click', newMap);
+  document.getElementById('exportJsonBtn').addEventListener('click', exportJson);
+  document.getElementById('importJsonBtn').addEventListener('click', () => document.getElementById('importJsonInput').click());
+  document.getElementById('importJsonInput').addEventListener('change', e => {
+    if (e.target.files[0]) importJson(e.target.files[0]);
+  });
+
+  document.getElementById('maptilerKey').addEventListener('change', e => {
+    config.maptilerKey = e.target.value.trim();
+    saveConfig();
+    checkKey();
+    if (config.maptilerKey && !map) {
+      document.getElementById('map').innerHTML = '';
+      initMap();
+    } else if (map) {
+      refreshMapStyle();
+    }
+  });
+
+  document.getElementById('mapStyle').addEventListener('change', e => {
+    config.mapStyle = e.target.value;
+    saveConfig();
+    refreshMapStyle();
+  });
+
+  // Avant impression : recadrer la carte pour qu'elle rentre dans le PDF
+  // (le navigateur change le ratio d'aspect à l'impression, ce qui peut couper les étapes)
+  let savedView = null;
+  window.addEventListener('beforeprint', () => {
+    if (!map) return;
+    savedView = { center: map.getCenter(), zoom: map.getZoom() };
+    if (state.cadrage !== 'auto') return;
+    const visibleForBounds = state.cities.filter(c => !c.excludeFromBounds);
+    if (visibleForBounds.length < 2) return;
+    const bounds = new maplibregl.LngLatBounds();
+    visibleForBounds.forEach(c => bounds.extend([c.lng, c.lat]));
+    // padding fixe et généreux en pixels (compatible toute taille de page)
+    const cam = map.cameraForBounds(bounds, { padding: 90, maxZoom: 13 });
+    if (cam) {
+      map.jumpTo(cam);
+      map.resize();
+      drawOverlay();
+    }
+  });
+
+  window.addEventListener('afterprint', () => {
+    if (!map || !savedView) return;
+    map.jumpTo(savedView);
+    map.resize();
+    drawOverlay();
+    savedView = null;
+  });
+
+  // Listeners globaux pour le drag des labels et des avions
+  document.addEventListener('mousemove', (e) => {
+    onLabelMouseMove(e);
+    onPlaneMouseMove(e);
+  });
+  document.addEventListener('mouseup', () => {
+    endLabelDrag();
+    endPlaneDrag();
+  });
+}
+
+document.addEventListener('DOMContentLoaded', init);
+window.removeCity = removeCity;
+window.renameCity = renameCity;
+window.removeRoute = removeRoute;
+window.loadMap = loadMap;
+window.deleteMap = deleteMap;
+window.duplicateMap = duplicateMap;
+window.toggleExcludeBounds = toggleExcludeBounds;
+window.resetLabelPosition = resetLabelPosition;
+window.resetPlanePosition = resetPlanePosition;
+window.setCurve = setCurve;
+window.resetCurve = resetCurve;
+window.changeRouteTransport = changeRouteTransport;
+window.toggleRouteArrow = toggleRouteArrow;
+window.removeAnnotation = removeAnnotation;
+window.updateAnnotation = updateAnnotation;
+window.exportPNG = exportPNG;
+</script>
+
+</body>
+</html>
